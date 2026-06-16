@@ -412,13 +412,29 @@
   /* Slider value display */
   .slider-val { font-size: 1.5rem; font-weight: 800; color: var(--purple); text-align: center; }
 
-  .q-progress { color: var(--muted); font-size: 0.85rem; text-align: center; }
+  .floating-code {
+    position: fixed;
+    top: 12px;
+    right: 12px;
+    background: rgba(30,30,58,0.85);
+    border: 1px solid var(--purple);
+    border-radius: 8px;
+    padding: 4px 10px;
+    font-family: 'Bebas Neue', sans-serif;
+    font-size: 1.1rem;
+    color: var(--purple);
+    letter-spacing: 3px;
+    backdrop-filter: blur(6px);
+    z-index: 999;
+    display: none;
+  }
 
   /* screen-specific padding-bottom so content isn't cut off */
   .pb-safe { padding-bottom: 32px; }
 </style>
 </head>
 <body>
+<div class="floating-code" id="floating-code"></div>
 <div id="app">
 
   <!-- HOME -->
@@ -632,6 +648,13 @@ function showScreen(name) {
   clearTimer();
   document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
   document.getElementById('screen-' + name).classList.add('active');
+  const badge = document.getElementById('floating-code');
+  if (name === 'question' && appState.roomCode) {
+    badge.textContent = appState.roomCode;
+    badge.style.display = 'block';
+  } else {
+    badge.style.display = 'none';
+  }
   window.scrollTo(0, 0);
 }
 
