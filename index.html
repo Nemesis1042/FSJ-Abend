@@ -8,6 +8,7 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
 <style>
   *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
@@ -431,10 +432,52 @@
 
   /* screen-specific padding-bottom so content isn't cut off */
   .pb-safe { padding-bottom: 32px; }
+
+  /* Podium */
+  .podium-row { display: flex; justify-content: center; align-items: flex-end; gap: 12px; margin: 16px 0 8px; }
+  .podium-slot { display: flex; flex-direction: column; align-items: center; gap: 4px; opacity: 0; transform: translateY(30px); transition: opacity 0.5s, transform 0.5s; }
+  .podium-slot.visible { opacity: 1; transform: translateY(0); }
+  .podium-medal { font-size: 1.8rem; }
+  .podium-name { font-family: 'Bebas Neue', sans-serif; font-size: 1.3rem; line-height: 1; text-align: center; word-break: break-word; max-width: 100px; }
+  .podium-count { font-size: 0.75rem; color: var(--muted); }
+  .podium-block { border-radius: 8px 8px 0 0; width: 80px; background: rgba(255,255,255,0.07); }
+
+  /* Category breakdown */
+  .cat-result-card { background: var(--card2); border-radius: 12px; padding: 14px 16px; display: flex; align-items: center; gap: 12px; }
+  .cat-result-icon { font-size: 1.5rem; flex-shrink: 0; }
+  .cat-result-label { font-size: 0.75rem; color: var(--muted); font-weight: 600; }
+  .cat-result-winner { font-family: 'Bebas Neue', sans-serif; font-size: 1.3rem; line-height: 1.1; }
+
+  /* Screenshot btn */
+  .btn-screenshot {
+    background: transparent;
+    border: 2px solid var(--muted);
+    color: var(--muted);
+    font-size: 0.9rem;
+    padding: 10px 16px;
+    border-radius: 10px;
+    width: auto;
+    align-self: flex-end;
+    transition: border-color 0.15s, color 0.15s;
+  }
+  .btn-screenshot:hover { border-color: var(--purple); color: var(--text); }
+
+  /* Reconnect toast */
+  .reconnect-toast {
+    position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%);
+    background: var(--card); border: 1px solid var(--purple); border-radius: 12px;
+    padding: 12px 20px; font-size: 0.9rem; z-index: 9999;
+    animation: slide-up 0.3s ease; display: none;
+  }
+  @keyframes slide-up {
+    from { opacity: 0; transform: translateX(-50%) translateY(20px); }
+    to   { opacity: 1; transform: translateX(-50%) translateY(0); }
+  }
 </style>
 </head>
 <body>
 <div class="floating-code" id="floating-code"></div>
+<div class="reconnect-toast" id="reconnect-toast"></div>
 <div id="app">
 
   <!-- HOME -->
@@ -576,11 +619,16 @@
 
   <!-- RESULTS -->
   <div id="screen-results" class="screen pb-safe">
-    <div style="padding-top:24px;">
+    <div style="padding-top:24px;display:flex;align-items:center;justify-content:space-between;">
       <h2>🏆 Auswertung</h2>
+      <button class="btn-screenshot" onclick="takeScreenshot()">📸 Screenshot</button>
     </div>
     <div class="results-list" id="results-list"></div>
     <div class="gesamtsieger-card" id="gesamtsieger-card"></div>
+    <div id="cat-breakdown" style="display:none;">
+      <div class="section-title" style="margin-top:8px;">Meistgenannt pro Kategorie</div>
+      <div style="display:flex;flex-direction:column;gap:8px;" id="cat-breakdown-list"></div>
+    </div>
   </div>
 
 </div>
@@ -829,9 +877,11 @@ async function createRoom() {
   const selectedCats = [...document.querySelectorAll('#cat-grid .cat-card.selected')].map(d => d.dataset.key);
   if (selectedCats.length === 0) { alert('Bitte mindestens eine Kategorie auswählen.'); return; }
 
-  // Build question pool from selected categories
+  // Build question pool from selected categories — store {text, cat}
   let pool = [];
-  selectedCats.forEach(key => { pool = pool.concat(QUESTIONS[key].questions); });
+  selectedCats.forEach(key => {
+    QUESTIONS[key].questions.forEach(q => pool.push({ text: q, cat: key }));
+  });
 
   // Shuffle pool
   for (let i = pool.length - 1; i > 0; i--) {
@@ -861,9 +911,8 @@ async function createRoom() {
   appState.status = 'lobby';
   appState.voterName = 'moderator';
 
-  // Init cleanup just in case
   await api('cleanup');
-
+  saveSession();
   showLobby();
 }
 
@@ -886,15 +935,14 @@ async function joinRoom() {
   appState.voterName = 'anon_' + Math.random().toString(36).slice(2, 8);
   appState.hasVoted = false;
 
-  // Reconstruct colors
   const colorsArr = state.colors || [];
   const playerColors = {};
   appState.players.forEach((p, i) => { playerColors[p] = colorsArr[i] || COLORS[i % COLORS.length]; });
   appState.playerColors = playerColors;
 
-  // Register in joinedPlayers
   const joined = [...(state.joinedPlayers || []), appState.voterName];
   await api('update_room', { code, fields: { joinedPlayers: joined } });
+  saveSession();
 
   if (appState.status === 'playing') {
     showQuestionScreen();
@@ -983,7 +1031,8 @@ function showQuestionScreen() {
 
   showScreen('question');
   const q = appState.questions[appState.currentQ];
-  document.getElementById('q-text').textContent = q;
+  const qText = q?.text ?? q;  // handle both {text,cat} and plain string (reconnect)
+  document.getElementById('q-text').textContent = qText;
   document.getElementById('q-progress-text').textContent = `Frage ${appState.currentQ + 1} von ${appState.questions.length}`;
 
   // Moderator vs voter
@@ -1245,16 +1294,16 @@ async function goToResults() {
 }
 
 async function loadAndShowResults() {
-  // Collect all results
   allResults = [];
   for (let i = 0; i <= appState.currentQ; i++) {
     const res = await api('get_votes', { code: appState.roomCode, questionIdx: i });
     const votes = res.votes || [];
-    // Count votes per player
     const counts = {};
     votes.forEach(v => { counts[v.voted_for] = (counts[v.voted_for] || 0) + 1; });
+    const q = appState.questions[i];
     allResults.push({
-      question: appState.questions[i],
+      question: q?.text ?? q,
+      cat: q?.cat ?? null,
       counts,
     });
   }
@@ -1269,14 +1318,20 @@ function renderResults() {
   const list = document.getElementById('results-list');
   list.innerHTML = '';
 
-  // Gesamtsieger tally
+  // Gesamtsieger tally + per-category tally
   const totalTally = {};
+  const catTally = {};  // cat -> { name -> count }
   allResults.forEach(r => {
     Object.entries(r.counts).forEach(([name, cnt]) => {
       totalTally[name] = (totalTally[name] || 0) + cnt;
+      if (r.cat) {
+        if (!catTally[r.cat]) catTally[r.cat] = {};
+        catTally[r.cat][name] = (catTally[r.cat][name] || 0) + cnt;
+      }
     });
   });
 
+  // Per-question cards
   allResults.forEach((r, idx) => {
     const card = document.createElement('div');
     card.className = 'result-card';
@@ -1286,7 +1341,6 @@ function renderResults() {
       .filter(([, cnt]) => cnt > 0);
 
     const total = sorted.reduce((a, [, c]) => a + c, 0);
-
     let inner = `<div class="result-question">Frage ${idx + 1}: Wer würde am ehesten… ${r.question}?</div>`;
 
     if (sorted.length === 0) {
@@ -1313,25 +1367,98 @@ function renderResults() {
     </div>`;
     card.innerHTML = inner;
     list.appendChild(card);
-    requestAnimationFrame(() => {
-      drawResultPie(canvasId, sorted, appState.playerColors, total);
-    });
+    requestAnimationFrame(() => drawResultPie(canvasId, sorted, appState.playerColors, total));
   });
 
-  // Gesamtsieger
+  // ── Gesamtsieger with Podium ──────────────────────────────────────────────
   const topEntries = Object.entries(totalTally).sort((a, b) => b[1] - a[1]);
   const gsCard = document.getElementById('gesamtsieger-card');
   if (topEntries.length > 0) {
+    const medals = ['🥇','🥈','🥉'];
+    const heights = [80, 60, 44];
+    const top3 = topEntries.slice(0, 3);
+
+    // Reorder visually: 2nd, 1st, 3rd
+    const order = top3.length >= 2
+      ? [top3[1], top3[0], top3[2]].filter(Boolean)
+      : [top3[0]];
+    const orderMedals = top3.length >= 2 ? ['🥈','🥇','🥉'] : ['🥇'];
+    const orderHeights = top3.length >= 2 ? [heights[1], heights[0], heights[2]] : [heights[0]];
+
     const [gsName, gsCount] = topEntries[0];
     const gsColor = appState.playerColors[gsName] || '#fff';
+
     gsCard.innerHTML = `
       <div class="gesamtsieger-label">👑 Gesamtsieger:in</div>
-      <div class="gesamtsieger-name" style="color:${gsColor};text-shadow:0 0 24px ${gsColor}88;">${gsName}</div>
-      <div class="gesamtsieger-count">${gsCount} mal gewählt über alle Fragen</div>
+      <div class="podium-row" id="podium-row">
+        ${order.map(([name, cnt], i) => {
+          const color = appState.playerColors[name] || '#fff';
+          return `<div class="podium-slot" style="transition-delay:${0.1 + i * 0.15}s;">
+            <div class="podium-medal">${orderMedals[i]}</div>
+            <div class="podium-name" style="color:${color};text-shadow:0 0 10px ${color}66;">${name.split(' ')[0]}</div>
+            <div class="podium-count">${cnt}×</div>
+            <div class="podium-block" style="height:${orderHeights[i]}px;background:${color}22;border-top:2px solid ${color}66;"></div>
+          </div>`;
+        }).join('')}
+      </div>
+      <div class="gesamtsieger-count" style="margin-top:0;">${gsName} wurde ${gsCount}× gewählt</div>
     `;
     gsCard.style.display = 'block';
+
+    // Trigger animation
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        gsCard.querySelectorAll('.podium-slot').forEach(el => el.classList.add('visible'));
+      });
+    });
   } else {
     gsCard.style.display = 'none';
+  }
+
+  // ── Meistgenannt pro Kategorie ────────────────────────────────────────────
+  const bdWrap = document.getElementById('cat-breakdown');
+  const bdList = document.getElementById('cat-breakdown-list');
+  const catKeys = Object.keys(catTally);
+  if (catKeys.length > 0) {
+    bdList.innerHTML = catKeys.map(cat => {
+      const catInfo = QUESTIONS[cat];
+      if (!catInfo) return '';
+      const entries = Object.entries(catTally[cat]).sort((a, b) => b[1] - a[1]);
+      if (entries.length === 0) return '';
+      const [winnerName, winnerCnt] = entries[0];
+      const color = appState.playerColors[winnerName] || '#fff';
+      return `<div class="cat-result-card">
+        <div class="cat-result-icon">${catInfo.icon}</div>
+        <div style="flex:1;min-width:0;">
+          <div class="cat-result-label">${catInfo.label}</div>
+          <div class="cat-result-winner" style="color:${color};">${winnerName}</div>
+        </div>
+        <div style="font-size:0.85rem;color:var(--muted);flex-shrink:0;">${winnerCnt}×</div>
+      </div>`;
+    }).join('');
+    bdWrap.style.display = 'block';
+  } else {
+    bdWrap.style.display = 'none';
+  }
+}
+
+async function takeScreenshot() {
+  const btn = document.querySelector('.btn-screenshot');
+  btn.textContent = '⏳ …';
+  btn.disabled = true;
+  try {
+    const canvas = await html2canvas(document.getElementById('screen-results'), {
+      backgroundColor: '#0d0d1a',
+      scale: 2,
+      useCORS: true,
+    });
+    const link = document.createElement('a');
+    link.download = 'fsj-auswertung.png';
+    link.href = canvas.toDataURL('image/png');
+    link.click();
+  } finally {
+    btn.textContent = '📸 Screenshot';
+    btn.disabled = false;
   }
 }
 
@@ -1377,19 +1504,73 @@ function drawResultPie(canvasId, sorted, playerColors, total) {
   ctx.fill();
 }
 
+// ── Session Persistence ───────────────────────────────────────────────────────
+
+function saveSession() {
+  sessionStorage.setItem('fsj_session', JSON.stringify({
+    role: appState.role,
+    roomCode: appState.roomCode,
+    voterName: appState.voterName,
+    players: appState.players,
+    playerColors: appState.playerColors,
+    questions: appState.questions,
+  }));
+}
+
+function showToast(msg, duration = 3000) {
+  const t = document.getElementById('reconnect-toast');
+  t.textContent = msg;
+  t.style.display = 'block';
+  setTimeout(() => { t.style.display = 'none'; }, duration);
+}
+
+async function tryReconnect(session) {
+  const res = await api('get_room', { code: session.roomCode });
+  if (!res.success) { sessionStorage.removeItem('fsj_session'); return false; }
+
+  const state = res.room.state;
+  Object.assign(appState, {
+    role: session.role,
+    roomCode: session.roomCode,
+    voterName: session.voterName,
+    players: session.players,
+    playerColors: session.playerColors,
+    questions: session.questions,
+    currentQ: state.currentQ || 0,
+    status: state.status || 'lobby',
+    hasVoted: false,
+  });
+  showToast('🔄 Reconnected zu ' + session.roomCode);
+  if (appState.status === 'playing') showQuestionScreen();
+  else if (appState.status === 'ended') await loadAndShowResults();
+  else showLobby();
+  return true;
+}
+
 // ── Init ──────────────────────────────────────────────────────────────────────
 
 initSetup();
 
-// Auto-join if URL contains ?join=CODE (from QR code scan)
-const _urlJoin = new URLSearchParams(window.location.search).get('join');
-if (_urlJoin) {
-  showScreen('join');
-  document.getElementById('join-code').value = _urlJoin.toUpperCase();
-  joinRoom();
-} else {
+(async () => {
+  const _urlJoin = new URLSearchParams(window.location.search).get('join');
+  if (_urlJoin) {
+    showScreen('join');
+    document.getElementById('join-code').value = _urlJoin.toUpperCase();
+    await joinRoom();
+    return;
+  }
+
+  // Try to reconnect from sessionStorage
+  const saved = sessionStorage.getItem('fsj_session');
+  if (saved) {
+    try {
+      const session = JSON.parse(saved);
+      if (session.roomCode && await tryReconnect(session)) return;
+    } catch(e) { sessionStorage.removeItem('fsj_session'); }
+  }
+
   showScreen('home');
-}
+})();
 </script>
 </body>
 </html>
