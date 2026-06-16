@@ -1148,6 +1148,8 @@ function updateBarChart(players, voteCounts, total) {
 function setupVoteSuggestions(players) {
   const oldInput = document.getElementById('vote-input');
   const newInput = oldInput.cloneNode(true);
+  newInput.disabled = false;
+  newInput.value = '';
   oldInput.parentNode.replaceChild(newInput, oldInput);
 
   const dropdown = document.getElementById('vote-dropdown');
