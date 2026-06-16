@@ -507,6 +507,12 @@
       <label>Raumcode (5 Zeichen)</label>
       <input type="text" id="join-code" maxlength="5" placeholder="z.B. AB3XY" autocomplete="off" oninput="this.value=this.value.toUpperCase()">
     </div>
+    <div class="card">
+      <label>Wer bist du? <span style="color:var(--muted);font-weight:400;">(optional – verhindert Selbstvote)</span></label>
+      <select id="join-own-name" style="width:100%;background:#12122a;color:var(--text);border:2px solid #333355;border-radius:10px;padding:12px 14px;font-family:'Inter',sans-serif;font-size:1rem;outline:none;">
+        <option value="">— Anonym bleiben —</option>
+      </select>
+    </div>
     <button class="btn-primary" onclick="joinRoom()">🚀 Beitreten</button>
     <button class="btn-secondary" onclick="showScreen('home')">← Zurück</button>
   </div>
@@ -663,6 +669,7 @@ const appState = {
   role: null,         // 'moderator' | 'voter'
   roomCode: null,
   voterName: null,
+  ownName: null,      // player's real name, local only, for self-vote prevention
   players: [],        // full names
   playerColors: {},   // name -> color
   questions: [],
@@ -926,6 +933,18 @@ async function joinRoom() {
   if (!res.success) { alert('Raum nicht gefunden!'); return; }
 
   const state = res.room.state;
+
+  // Populate name dropdown if not yet filled (QR-code auto-join path)
+  const sel = document.getElementById('join-own-name');
+  if (sel.options.length <= 1) {
+    (state.players || []).forEach(p => {
+      const opt = document.createElement('option');
+      opt.value = p;
+      opt.textContent = p;
+      sel.appendChild(opt);
+    });
+  }
+
   appState.role = 'voter';
   appState.roomCode = code;
   appState.players = state.players || [];
@@ -933,6 +952,7 @@ async function joinRoom() {
   appState.currentQ = state.currentQ || 0;
   appState.status = state.status || 'lobby';
   appState.voterName = 'anon_' + Math.random().toString(36).slice(2, 8);
+  appState.ownName = sel.value || null;
   appState.hasVoted = false;
 
   const colorsArr = state.colors || [];
@@ -1224,6 +1244,7 @@ function setupVoteSuggestions(players) {
     if (!val) { dropdown.style.display = 'none'; return; }
 
     const matches = players.filter(p => {
+      if (appState.ownName && p === appState.ownName) return false; // no self-vote
       const firstName = p.split(' ')[0].toLowerCase();
       const fullLower = p.toLowerCase();
       const v = val.toLowerCase();
@@ -1252,6 +1273,7 @@ function setupVoteSuggestions(players) {
 
 async function submitVote(name) {
   if (appState.hasVoted) return;
+  if (appState.ownName && name === appState.ownName) return; // double-check
   document.getElementById('vote-dropdown').style.display = 'none';
   document.getElementById('vote-input').value = '';
 
@@ -1511,6 +1533,7 @@ function saveSession() {
     role: appState.role,
     roomCode: appState.roomCode,
     voterName: appState.voterName,
+    ownName: appState.ownName,
     players: appState.players,
     playerColors: appState.playerColors,
     questions: appState.questions,
@@ -1533,6 +1556,7 @@ async function tryReconnect(session) {
     role: session.role,
     roomCode: session.roomCode,
     voterName: session.voterName,
+    ownName: session.ownName || null,
     players: session.players,
     playerColors: session.playerColors,
     questions: session.questions,
