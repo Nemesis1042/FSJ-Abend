@@ -560,11 +560,15 @@
       <div id="voted-confirm" style="display:none;" class="voted-confirm">✓ Stimme abgegeben!</div>
     </div>
 
-    <!-- Moderator bar chart -->
+    <!-- Moderator live pie -->
     <div id="mod-bar-wrap">
       <div class="card">
         <div class="section-title">Live-Ergebnis</div>
-        <div class="bar-chart" id="q-bar-chart"></div>
+        <div class="pie-wrap" id="q-live-pie-wrap" style="min-height:60px;">
+          <div class="text-muted" id="q-live-empty" style="padding:12px 0;">Noch keine Stimmen…</div>
+          <canvas id="q-live-canvas" width="220" height="220" style="display:none;"></canvas>
+          <div class="pie-legend" id="q-live-legend"></div>
+        </div>
       </div>
       <div id="mod-next-btn-wrap" style="margin-top:8px;"></div>
     </div>
@@ -1123,22 +1127,33 @@ function spawnParticles() {
 }
 
 function updateBarChart(players, voteCounts, total) {
-  const chart = document.getElementById('q-bar-chart');
-  const sorted = [...players].sort((a, b) => (voteCounts[b] || 0) - (voteCounts[a] || 0));
-  const maxVotes = sorted.length > 0 ? (voteCounts[sorted[0]] || 0) : 1;
+  const sorted = Object.entries(voteCounts)
+    .filter(([, c]) => c > 0)
+    .sort((a, b) => b[1] - a[1]);
 
-  chart.innerHTML = sorted.map((p, i) => {
-    const cnt = voteCounts[p] || 0;
-    const pct = maxVotes > 0 ? (cnt / maxVotes) * 100 : 0;
-    const color = appState.playerColors[p] || COLORS[i % COLORS.length];
-    const isLeading = i === 0 && cnt > 0;
-    const firstName = p.split(' ')[0];
-    return `<div class="bar-row">
-      <div class="bar-name" title="${p}">${firstName}</div>
-      <div class="bar-track">
-        <div class="bar-fill ${isLeading ? 'leading' : ''}" style="width:${pct}%;background:${color};"></div>
-      </div>
-      <div class="bar-count">${cnt}</div>
+  const emptyEl = document.getElementById('q-live-empty');
+  const canvas  = document.getElementById('q-live-canvas');
+  const legend  = document.getElementById('q-live-legend');
+
+  if (sorted.length === 0) {
+    emptyEl.style.display = 'block';
+    canvas.style.display  = 'none';
+    legend.innerHTML = '';
+    return;
+  }
+
+  emptyEl.style.display = 'none';
+  canvas.style.display  = 'block';
+
+  drawResultPie('q-live-canvas', sorted, appState.playerColors, total);
+
+  legend.innerHTML = sorted.map(([name, cnt]) => {
+    const pct   = Math.round(cnt / total * 100);
+    const color = appState.playerColors[name] || '#fff';
+    return `<div class="pie-legend-item">
+      <span class="pie-legend-dot" style="background:${color};"></span>
+      <span class="pie-legend-name">${name}</span>
+      <span class="pie-legend-pct">${pct}% (${cnt})</span>
     </div>`;
   }).join('');
 }
