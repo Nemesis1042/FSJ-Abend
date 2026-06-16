@@ -7,6 +7,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
 <style>
   *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
@@ -315,21 +316,15 @@
   .vote-suggestion-item:hover { background: #252550; }
   .voted-confirm { color: var(--green); font-size: 1.1rem; font-weight: 700; text-align: center; padding: 16px; }
 
-  /* Results */
-  .results-toggle { display: flex; gap: 8px; }
-  .toggle-btn {
-    flex: 1;
-    background: #12122a;
-    border: 2px solid transparent;
-    color: var(--muted);
-    border-radius: 10px;
-    padding: 10px;
-    font-size: 0.9rem;
-    font-weight: 600;
-    cursor: pointer;
-    transition: border-color 0.15s, color 0.15s;
+  /* QR Code */
+  .qr-wrap {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 10px;
+    padding: 16px 0 4px;
   }
-  .toggle-btn.active { border-color: var(--purple); color: var(--text); }
+  .qr-wrap canvas, .qr-wrap img { border-radius: 10px; }
 
   .result-card { background: var(--card); border-radius: 16px; padding: 20px; }
   .result-question { font-size: 0.85rem; color: var(--muted); margin-bottom: 12px; font-weight: 600; }
@@ -502,6 +497,11 @@
       <p class="text-muted" style="margin-top:4px;">Alle Teilnehmenden diesen Code eingeben lassen</p>
     </div>
     <div class="card">
+      <div class="section-title" style="text-align:center;margin-bottom:0;">QR-Code zum Beitreten</div>
+      <div class="qr-wrap" id="qr-wrap"></div>
+      <p class="text-muted" style="text-align:center;font-size:0.78rem;margin-top:4px;">Scannen → direkt beitreten</p>
+    </div>
+    <div class="card">
       <div class="section-title">Spieler im Raum: <span id="lobby-player-count">0</span></div>
       <ul class="player-list" id="lobby-player-list"></ul>
     </div>
@@ -559,10 +559,6 @@
     <div style="padding-top:24px;">
       <h2>🏆 Auswertung</h2>
     </div>
-    <div class="results-toggle">
-      <button class="toggle-btn active" id="toggle-pie" onclick="setResultView('pie')">🥧 Kreisdiagramm</button>
-      <button class="toggle-btn" id="toggle-bar" onclick="setResultView('bar')">📊 Balken & Name</button>
-    </div>
     <div class="results-list" id="results-list"></div>
     <div class="gesamtsieger-card" id="gesamtsieger-card"></div>
   </div>
@@ -611,7 +607,6 @@ let pollInterval = null;
 let timerInterval = null;
 let timerSecondsLeft = 30;
 let prevLeaderName = null;
-let resultView = 'pie';
 let extraNames = [];
 let allResults = [];   // [{question, votes:[{voted_for,cnt}]}] collected at results time
 
@@ -896,6 +891,19 @@ function showLobby() {
     document.getElementById('lobby-moderator-ctrl').style.display = 'none';
     document.getElementById('lobby-voter-wait').style.display = 'block';
   }
+
+  // Generate QR code for join URL
+  const qrWrap = document.getElementById('qr-wrap');
+  qrWrap.innerHTML = '';
+  const joinUrl = window.location.href.replace(/[?#].*$/, '').replace(/\/[^\/]*$/, '/') + 'index.html?join=' + appState.roomCode;
+  new QRCode(qrWrap, {
+    text: joinUrl,
+    width: 180,
+    height: 180,
+    colorDark: '#f0f0ff',
+    colorLight: '#12122a',
+    correctLevel: QRCode.CorrectLevel.M,
+  });
 
   pollLobby();
 }
@@ -1217,13 +1225,6 @@ async function loadAndShowResults() {
 
 // ── Results Rendering ─────────────────────────────────────────────────────────
 
-function setResultView(v) {
-  resultView = v;
-  document.getElementById('toggle-pie').classList.toggle('active', v === 'pie');
-  document.getElementById('toggle-bar').classList.toggle('active', v === 'bar');
-  renderResults();
-}
-
 function renderResults() {
   const list = document.getElementById('results-list');
   list.innerHTML = '';
@@ -1250,53 +1251,31 @@ function renderResults() {
 
     if (sorted.length === 0) {
       inner += '<div class="text-muted">Keine Stimmen</div>';
-    } else if (resultView === 'pie') {
-      const canvasId = 'pie-canvas-' + idx;
-      inner += `<div class="pie-wrap">
-        <canvas id="${canvasId}" width="220" height="220"></canvas>
-        <div class="pie-legend">
-          ${sorted.map(([name, cnt]) => {
-            const pct = Math.round(cnt / total * 100);
-            const color = appState.playerColors[name] || '#fff';
-            return `<div class="pie-legend-item">
-              <span class="pie-legend-dot" style="background:${color};"></span>
-              <span class="pie-legend-name">${name}</span>
-              <span class="pie-legend-pct">${pct}% (${cnt})</span>
-            </div>`;
-          }).join('')}
-        </div>
-      </div>`;
       card.innerHTML = inner;
       list.appendChild(card);
-      // Draw pie after element is in DOM
-      requestAnimationFrame(() => {
-        drawResultPie(canvasId, sorted, appState.playerColors, total);
-      });
       return;
-    } else {
-      // Bar view
-      const winner = sorted[0];
-      const winnerColor = appState.playerColors[winner[0]] || '#fff';
-      inner += `<div style="text-align:center;margin-bottom:12px;">
-        <div class="winner-big" style="color:${winnerColor};text-shadow:0 0 20px ${winnerColor}66;">${winner[0]}</div>
-        <div style="color:var(--muted);font-size:0.85rem;margin-top:4px;">${winner[1]} Stimme${winner[1]!==1?'n':''}</div>
-      </div>`;
-      const maxCnt = sorted[0][1];
-      inner += '<div class="bar-chart">';
-      sorted.forEach(([name, cnt]) => {
-        const pct = maxCnt > 0 ? (cnt / maxCnt) * 100 : 0;
-        const color = appState.playerColors[name] || '#fff';
-        inner += `<div class="bar-row">
-          <div class="bar-name" title="${name}">${name.split(' ')[0]}</div>
-          <div class="bar-track"><div class="bar-fill" style="width:${pct}%;background:${color};"></div></div>
-          <div class="bar-count">${cnt}</div>
-        </div>`;
-      });
-      inner += '</div>';
     }
 
+    const canvasId = 'pie-canvas-' + idx;
+    inner += `<div class="pie-wrap">
+      <canvas id="${canvasId}" width="220" height="220"></canvas>
+      <div class="pie-legend">
+        ${sorted.map(([name, cnt]) => {
+          const pct = Math.round(cnt / total * 100);
+          const color = appState.playerColors[name] || '#fff';
+          return `<div class="pie-legend-item">
+            <span class="pie-legend-dot" style="background:${color};"></span>
+            <span class="pie-legend-name">${name}</span>
+            <span class="pie-legend-pct">${pct}% (${cnt})</span>
+          </div>`;
+        }).join('')}
+      </div>
+    </div>`;
     card.innerHTML = inner;
     list.appendChild(card);
+    requestAnimationFrame(() => {
+      drawResultPie(canvasId, sorted, appState.playerColors, total);
+    });
   });
 
   // Gesamtsieger
@@ -1360,11 +1339,17 @@ function drawResultPie(canvasId, sorted, playerColors, total) {
 
 // ── Init ──────────────────────────────────────────────────────────────────────
 
-// Initialize setup screen on load
 initSetup();
 
-// Show home screen
-showScreen('home');
+// Auto-join if URL contains ?join=CODE (from QR code scan)
+const _urlJoin = new URLSearchParams(window.location.search).get('join');
+if (_urlJoin) {
+  showScreen('join');
+  document.getElementById('join-code').value = _urlJoin.toUpperCase();
+  joinRoom();
+} else {
+  showScreen('home');
+}
 </script>
 </body>
 </html>
