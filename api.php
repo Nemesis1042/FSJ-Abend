@@ -68,6 +68,25 @@ try {
 
     switch ($action) {
 
+        case 'health': {
+            $dbOk = false;
+            $dbError = null;
+            try {
+                $pdo->query('SELECT 1');
+                $dbOk = true;
+            } catch (Throwable $e) {
+                $dbError = $e->getMessage();
+            }
+            jsonOut([
+                'success' => true,
+                'status'  => $dbOk ? 'ok' : 'degraded',
+                'db'      => $dbOk ? 'connected' : 'error',
+                'db_error'=> $dbError,
+                'php'     => PHP_VERSION,
+                'time'    => date('c'),
+            ]);
+        }
+
         case 'cleanup': {
             // Create tables if not exist
             $pdo->exec("CREATE TABLE IF NOT EXISTS rooms (
