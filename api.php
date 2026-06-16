@@ -7,20 +7,32 @@ if (isset($_GET['debug']) && $_GET['debug'] === '1') {
     ini_set('display_errors', 1);
 }
 
-// DB credentials — override via environment variables
-define('MYDB_HOST', $_ENV['MYDB_HOST'] ?? 'localhost');
-define('MYDB_NAME', $_ENV['MYDB_NAME'] ?? 'mydb');
-define('MYDB_USER', $_ENV['MYDB_USER'] ?? 'myuser');
-define('MYDB_PASS', $_ENV['MYDB_PASS'] ?? 'mypass');
+define('DB_PATH', __DIR__ . '/fsj.db');
 
 function getDB(): PDO {
     static $pdo = null;
     if ($pdo === null) {
-        $dsn = 'mysql:host=' . MYDB_HOST . ';dbname=' . MYDB_NAME . ';charset=utf8mb4';
-        $pdo = new PDO($dsn, MYDB_USER, MYDB_PASS, [
-            PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
+        $pdo = new PDO('sqlite:' . DB_PATH, null, null, [
+            PDO::ATTR_ERRMODE            => PDO::ERRMODE_EXCEPTION,
             PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
         ]);
+        $pdo->exec('PRAGMA journal_mode=WAL');
+        $pdo->exec('PRAGMA foreign_keys=ON');
+        // Auto-create tables on first connect
+        $pdo->exec("CREATE TABLE IF NOT EXISTS rooms (
+            code       TEXT NOT NULL PRIMARY KEY,
+            state      TEXT NOT NULL,
+            created_at TEXT NOT NULL DEFAULT (datetime('now')),
+            updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+        )");
+        $pdo->exec("CREATE TABLE IF NOT EXISTS votes (
+            id           INTEGER PRIMARY KEY AUTOINCREMENT,
+            room_code    TEXT    NOT NULL,
+            question_idx INTEGER NOT NULL,
+            voter_name   TEXT    NOT NULL,
+            voted_for    TEXT    NOT NULL,
+            UNIQUE (room_code, question_idx, voter_name)
+        )");
     }
     return $pdo;
 }
@@ -88,30 +100,14 @@ try {
         }
 
         case 'cleanup': {
-            // Create tables if not exist
-            $pdo->exec("CREATE TABLE IF NOT EXISTS rooms (
-                code VARCHAR(6) NOT NULL PRIMARY KEY,
-                state MEDIUMTEXT NOT NULL,
-                created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-                updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
-            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
-
-            $pdo->exec("CREATE TABLE IF NOT EXISTS votes (
-                id INT AUTO_INCREMENT PRIMARY KEY,
-                room_code VARCHAR(6) NOT NULL,
-                question_idx INT NOT NULL,
-                voter_name VARCHAR(100) NOT NULL,
-                voted_for VARCHAR(100) NOT NULL,
-                UNIQUE KEY uq_vote (room_code, question_idx, voter_name)
-            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
-
-            // Delete old votes first (FK-like)
-            $delVotes = $pdo->prepare("DELETE v FROM votes v
-                INNER JOIN rooms r ON v.room_code = r.code
-                WHERE r.created_at < NOW() - INTERVAL 24 HOUR");
+            // Tables are auto-created in getDB(); just purge old data here
+            // Delete old votes first (no FK cascade)
+            $delVotes = $pdo->prepare("DELETE FROM votes WHERE room_code IN (
+                SELECT code FROM rooms WHERE created_at < datetime('now', '-24 hours')
+            )");
             $delVotes->execute();
 
-            $delRooms = $pdo->prepare("DELETE FROM rooms WHERE created_at < NOW() - INTERVAL 24 HOUR");
+            $delRooms = $pdo->prepare("DELETE FROM rooms WHERE created_at < datetime('now', '-24 hours')");
             $delRooms->execute();
             $deleted = $delRooms->rowCount();
 
@@ -149,7 +145,7 @@ try {
                 'joinedPlayers' => [],
             ]);
 
-            $stmt = $pdo->prepare("INSERT INTO rooms (code, state, created_at, updated_at) VALUES (?, ?, NOW(), NOW())");
+            $stmt = $pdo->prepare("INSERT INTO rooms (code, state, created_at, updated_at) VALUES (?, ?, datetime('now'), datetime('now'))");
             $stmt->execute([$code, $state]);
 
             jsonOut(['success' => true, 'code' => $code]);
@@ -200,7 +196,7 @@ try {
                 $state[$key] = $value;
             }
 
-            $upd = $pdo->prepare("UPDATE rooms SET state = ?, updated_at = NOW() WHERE code = ?");
+            $upd = $pdo->prepare("UPDATE rooms SET state = ?, updated_at = datetime('now') WHERE code = ?");
             $upd->execute([json_encode($state), $code]);
 
             jsonOut(['success' => true]);
@@ -216,9 +212,8 @@ try {
             if (!$voterName) errorOut('voterName required');
             if (!$votedFor) errorOut('votedFor required');
 
-            $stmt = $pdo->prepare("INSERT INTO votes (room_code, question_idx, voter_name, voted_for)
-                VALUES (?, ?, ?, ?)
-                ON DUPLICATE KEY UPDATE voted_for = VALUES(voted_for)");
+            $stmt = $pdo->prepare("INSERT OR REPLACE INTO votes (room_code, question_idx, voter_name, voted_for)
+                VALUES (?, ?, ?, ?)");
             $stmt->execute([$code, (int)$questionIdx, $voterName, $votedFor]);
 
             jsonOut(['success' => true]);
@@ -256,7 +251,7 @@ try {
                 $state['status'] = 'playing';
             }
 
-            $upd = $pdo->prepare("UPDATE rooms SET state = ?, updated_at = NOW() WHERE code = ?");
+            $upd = $pdo->prepare("UPDATE rooms SET state = ?, updated_at = datetime('now') WHERE code = ?");
             $upd->execute([json_encode($state), $code]);
 
             jsonOut(['success' => true, 'state' => $state]);
@@ -274,7 +269,7 @@ try {
             $state = json_decode($room['state'], true);
             $state['status'] = 'ended';
 
-            $upd = $pdo->prepare("UPDATE rooms SET state = ?, updated_at = NOW() WHERE code = ?");
+            $upd = $pdo->prepare("UPDATE rooms SET state = ?, updated_at = datetime('now') WHERE code = ?");
             $upd->execute([json_encode($state), $code]);
 
             jsonOut(['success' => true]);
