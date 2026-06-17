@@ -118,7 +118,6 @@ try {
             $players = $body['players'] ?? [];
             $questions = $body['questions'] ?? [];
             $colors = $body['colors'] ?? [];
-            $mode = $body['mode'] ?? 'live';
 
             if (empty($players)) errorOut('players required');
             if (empty($questions)) errorOut('questions required');
@@ -141,7 +140,6 @@ try {
                 'players' => $players,
                 'questions' => $questions,
                 'colors' => $colors,
-                'mode' => $mode,
                 'status' => 'lobby',
                 'currentQ' => 0,
                 'joinedPlayers' => [],
