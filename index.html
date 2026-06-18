@@ -500,45 +500,64 @@
       <ul class="player-list" id="lobby-player-list"></ul>
     </div>
     <div id="lobby-moderator-ctrl">
-      <button class="btn-green" onclick="startGame()">▶ Spiel starten</button>
+      <button class="btn-green" onclick="startVoting()">▶ Abstimmung starten</button>
     </div>
     <div id="lobby-voter-wait" style="display:none;">
       <div class="waiting-pulse">⏳ Warte auf Moderator…</div>
     </div>
   </div>
 
-  <!-- QUESTION -->
-  <div id="screen-question" class="screen pb-safe">
+  <!-- VOTER: self-paced voting through all questions -->
+  <div id="screen-prevote" class="screen pb-safe">
     <div class="card" style="background: var(--card2);">
-      <div class="q-progress" id="q-progress-text">Frage 1 von 10</div>
+      <div class="q-progress" id="prevote-progress">Frage 1 von 10</div>
       <div style="margin-top:8px;">
         <span class="question-prefix">Wer würde am ehesten…</span>
-        <div class="question-text" id="q-text">—</div>
+        <div class="question-text" id="prevote-q-text">—</div>
       </div>
     </div>
 
-    <div class="card text-center" id="voting-status-card" style="background:var(--card);">
-      <div style="font-size:2rem;">🤫</div>
-      <div class="section-title" style="margin-top:8px;margin-bottom:0;" id="vote-count-text">0 von 0 haben abgestimmt</div>
-      <p class="text-muted" style="margin-top:4px;">Ergebnisse werden erst am Ende aller Fragen aufgelöst.</p>
-    </div>
-
-    <!-- Voter input -->
-    <div id="voter-input-wrap" style="display:none;">
+    <div id="prevote-input-wrap">
       <div class="autocomplete-wrap">
-        <input type="text" id="vote-input" placeholder="Name tippen und abstimmen…" autocomplete="off">
-        <div class="autocomplete-dropdown" id="vote-dropdown" style="display:none;"></div>
+        <input type="text" id="prevote-vote-input" placeholder="Name tippen und abstimmen…" autocomplete="off">
+        <div class="autocomplete-dropdown" id="prevote-vote-dropdown" style="display:none;"></div>
       </div>
-      <div id="voted-confirm" style="display:none;" class="voted-confirm">✓ Stimme abgegeben!</div>
     </div>
 
-    <!-- Moderator controls -->
-    <div id="mod-bar-wrap">
-      <div id="mod-next-btn-wrap" style="margin-top:8px;"></div>
+    <div id="prevote-done" style="display:none;">
+      <div class="card text-center">
+        <div style="font-size:2rem;">✅</div>
+        <div class="section-title" style="margin-top:8px;">Danke, du hast bei allen Fragen abgestimmt!</div>
+        <div class="waiting-pulse">⏳ Die Auswertung macht die Moderation – schau auf den Beamer.</div>
+      </div>
     </div>
   </div>
 
-  <!-- RESULTS -->
+  <!-- MODERATOR: waiting for everyone to finish voting -->
+  <div id="screen-voting-mod" class="screen pb-safe">
+    <div style="padding-top:24px;text-align:center;">
+      <p class="subtitle">Raumcode</p>
+      <div class="room-code" id="voting-mod-code">-----</div>
+    </div>
+    <div class="card text-center">
+      <div style="font-size:2rem;">🤫</div>
+      <div class="section-title" style="margin-top:8px;">Teilnehmende stimmen gerade ab</div>
+      <p class="text-muted">Jede:r stimmt in eigenem Tempo über alle Fragen ab. Nur du siehst die Auswertung.</p>
+      <p class="text-green" style="margin-top:10px;" id="voting-mod-done-count">0 / 0 fertig</p>
+    </div>
+    <button class="btn-pink" onclick="finishVoting()">🏆 Abstimmung beenden &amp; Auswertung anzeigen</button>
+  </div>
+
+  <!-- VOTER: game ended, no results shown to voters -->
+  <div id="screen-voter-ended" class="screen pb-safe">
+    <div class="card text-center">
+      <div style="font-size:2rem;">🎬</div>
+      <div class="section-title" style="margin-top:8px;">Die Abstimmung ist beendet!</div>
+      <p class="text-muted">Die Auswertung zeigt nur die Moderation – schau auf den Beamer.</p>
+    </div>
+  </div>
+
+  <!-- RESULTS (moderator only) -->
   <div id="screen-results" class="screen pb-safe">
     <div style="padding-top:24px;display:flex;align-items:center;justify-content:space-between;">
       <h2>🏆 Auswertung</h2>
@@ -597,9 +616,8 @@ const appState = {
   players: [],        // full names
   playerColors: {},   // name -> color
   questions: [],
-  currentQ: 0,
+  voterQ: 0,           // voter's own progress through questions
   status: 'lobby',
-  hasVoted: false,
 };
 
 let pollInterval = null;
@@ -659,7 +677,7 @@ function showScreen(name) {
   document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
   document.getElementById('screen-' + name).classList.add('active');
   const badge = document.getElementById('floating-code');
-  if (name === 'question' && appState.roomCode) {
+  if (['prevote', 'voting-mod'].includes(name) && appState.roomCode) {
     badge.textContent = appState.roomCode;
     badge.style.display = 'block';
   } else {
@@ -861,7 +879,6 @@ async function createRoom() {
   appState.players = players;
   appState.playerColors = playerColors;
   appState.questions = questions;
-  appState.currentQ = 0;
   appState.status = 'lobby';
   appState.voterName = 'moderator';
 
@@ -897,11 +914,10 @@ async function joinRoom() {
   appState.roomCode = code;
   appState.players = state.players || [];
   appState.questions = state.questions || [];
-  appState.currentQ = state.currentQ || 0;
   appState.status = state.status || 'lobby';
   appState.voterName = 'anon_' + Math.random().toString(36).slice(2, 8);
   appState.ownName = sel.value || null;
-  appState.hasVoted = false;
+  appState.voterQ = 0;
 
   const colorsArr = state.colors || [];
   const playerColors = {};
@@ -912,10 +928,10 @@ async function joinRoom() {
   await api('update_room', { code, fields: { joinedPlayers: joined } });
   saveSession();
 
-  if (appState.status === 'playing') {
-    showQuestionScreen();
+  if (appState.status === 'voting') {
+    startPrevoteFlow();
   } else if (appState.status === 'ended') {
-    await loadAndShowResults();
+    showScreen('voter-ended');
   } else {
     showLobby();
   }
@@ -959,13 +975,12 @@ function pollLobby() {
     if (!res.success) return;
     const state = res.room.state;
     updateLobbyPlayerList(state.joinedPlayers || []);
-    if (appState.role === 'voter' && state.status === 'playing') {
+    if (appState.role === 'voter' && state.status === 'voting') {
       appState.players = state.players || appState.players;
       appState.questions = state.questions || appState.questions;
-      appState.currentQ = state.currentQ || 0;
-      appState.status = 'playing';
+      appState.status = 'voting';
       clearPoll();
-      showQuestionScreen();
+      startPrevoteFlow();
     }
   }, 2000);
 }
@@ -982,100 +997,77 @@ function updateLobbyPlayerList(list) {
   ul.innerHTML = list.map(p => `<li><span class="player-dot" style="background:var(--purple);"></span>${p}</li>`).join('');
 }
 
-async function startGame() {
+async function startVoting() {
   getAudioCtx(); // unlock audio on user gesture
-  await api('update_room', { code: appState.roomCode, fields: { status: 'playing', currentQ: 0 } });
-  appState.status = 'playing';
-  appState.currentQ = 0;
-  showQuestionScreen();
+  await api('update_room', { code: appState.roomCode, fields: { status: 'voting' } });
+  appState.status = 'voting';
+  showVotingModWait();
 }
 
-// ── Question Screen ───────────────────────────────────────────────────────────
-
-function showQuestionScreen() {
-  clearPoll();
-  appState.hasVoted = false;
-
-  showScreen('question');
-  const q = appState.questions[appState.currentQ];
-  const qText = q?.text ?? q;  // handle both {text,cat} and plain string (reconnect)
-  document.getElementById('q-text').textContent = qText;
-  document.getElementById('q-progress-text').textContent = `Frage ${appState.currentQ + 1} von ${appState.questions.length}`;
-
-  // Moderator vs voter
-  const isLast = appState.currentQ >= appState.questions.length - 1;
-  if (appState.role === 'moderator') {
-    document.getElementById('voter-input-wrap').style.display = 'none';
-    document.getElementById('mod-bar-wrap').style.display = 'block';
-
-    const btnWrap = document.getElementById('mod-next-btn-wrap');
-    if (isLast) {
-      btnWrap.innerHTML = '<button class="btn-pink" onclick="goToResults()">🏆 Auswertung anzeigen</button>';
-    } else {
-      btnWrap.innerHTML = '<button class="btn-primary" onclick="nextQuestion()">Nächste Frage ▶</button>';
-    }
-  } else {
-    document.getElementById('voter-input-wrap').style.display = 'block';
-    document.getElementById('mod-bar-wrap').style.display = 'none';
-    setupVoteSuggestions(appState.players);
-    document.getElementById('vote-input').value = '';
-    document.getElementById('vote-dropdown').style.display = 'none';
-    document.getElementById('voted-confirm').style.display = 'none';
-  }
-
-  pollQuestion();
+function showVotingModWait() {
+  showScreen('voting-mod');
+  document.getElementById('voting-mod-code').textContent = appState.roomCode;
+  pollVotingMod();
 }
 
-function pollQuestion() {
+function pollVotingMod() {
   clearPoll();
-  const prevQ = appState.currentQ;
   pollInterval = setInterval(async () => {
     const res = await api('get_room', { code: appState.roomCode });
     if (!res.success) return;
     const state = res.room.state;
-    const voteCounts = res.room.voteCounts || {};
-
-    const totalVotes = Object.values(voteCounts).reduce((a, b) => a + b, 0);
-    const totalJoined = (state.joinedPlayers || []).length;
-    const voteCountEl = document.getElementById('vote-count-text');
-    if (voteCountEl) voteCountEl.textContent = `${totalVotes} von ${totalJoined} haben abgestimmt`;
-
-    // Detect question change (voter side)
-    if (appState.role === 'voter' && state.currentQ !== prevQ) {
-      appState.currentQ = state.currentQ;
-      appState.status = state.status;
-      if (state.status === 'ended') {
-        clearPoll();
-        await loadAndShowResults();
-        return;
-      }
-      clearPoll();
-      showQuestionScreen();
-      return;
-    }
-
-    // Detect game ended (voter)
-    if (appState.role === 'voter' && state.status === 'ended') {
-      clearPoll();
-      await loadAndShowResults();
-      return;
-    }
-  }, 1500);
+    const done = (state.doneVoters || []).length;
+    const total = (state.joinedPlayers || []).length;
+    document.getElementById('voting-mod-done-count').textContent = `${done} / ${total} fertig`;
+  }, 2000);
 }
 
-// ── Vote Input (Voter) ────────────────────────────────────────────────────────
+async function finishVoting() {
+  clearPoll();
+  await api('end_game', { code: appState.roomCode });
+  appState.status = 'ended';
+  await loadAndShowResults();
+}
 
-function setupVoteSuggestions(players) {
-  const oldInput = document.getElementById('vote-input');
+// ── Prevote Flow (voter self-paced voting) ────────────────────────────────────
+
+function startPrevoteFlow() {
+  appState.voterQ = 0;
+  showPrevoteQuestion();
+}
+
+function showPrevoteQuestion() {
+  clearPoll();
+  showScreen('prevote');
+  if (appState.voterQ >= appState.questions.length) {
+    document.getElementById('prevote-input-wrap').style.display = 'none';
+    document.getElementById('prevote-done').style.display = 'block';
+    api('mark_voter_done', { code: appState.roomCode, voterName: appState.voterName });
+    pollAfterVotingDone();
+    return;
+  }
+  document.getElementById('prevote-input-wrap').style.display = 'block';
+  document.getElementById('prevote-done').style.display = 'none';
+
+  const q = appState.questions[appState.voterQ];
+  document.getElementById('prevote-progress').textContent = `Frage ${appState.voterQ + 1} von ${appState.questions.length}`;
+  document.getElementById('prevote-q-text').textContent = q?.text ?? q;
+
+  setupPrevoteVoteSuggestions(appState.players);
+  document.getElementById('prevote-vote-input').value = '';
+  document.getElementById('prevote-vote-dropdown').style.display = 'none';
+}
+
+function setupPrevoteVoteSuggestions(players) {
+  const oldInput = document.getElementById('prevote-vote-input');
   const newInput = oldInput.cloneNode(true);
   newInput.disabled = false;
   newInput.value = '';
   oldInput.parentNode.replaceChild(newInput, oldInput);
 
-  const dropdown = document.getElementById('vote-dropdown');
+  const dropdown = document.getElementById('prevote-vote-dropdown');
 
   newInput.addEventListener('input', () => {
-    if (appState.hasVoted) return;
     const val = newInput.value.trim();
     if (!val) { dropdown.style.display = 'none'; return; }
 
@@ -1095,7 +1087,7 @@ function setupVoteSuggestions(players) {
 
     dropdown.innerHTML = matches.map(p => {
       const color = appState.playerColors[p] || '#fff';
-      return `<div class="vote-suggestion-item" onclick="submitVote('${p.replace(/'/g,"\\'")}')">
+      return `<div class="vote-suggestion-item" onclick="submitPrevoteVote('${p.replace(/'/g,"\\'")}')">
         <span class="player-dot" style="background:${color};"></span>${p}
       </div>`;
     }).join('');
@@ -1107,51 +1099,44 @@ function setupVoteSuggestions(players) {
   });
 }
 
-async function submitVote(name) {
-  if (appState.hasVoted) return;
-  if (appState.ownName && name === appState.ownName) return; // double-check
-  document.getElementById('vote-dropdown').style.display = 'none';
-  document.getElementById('vote-input').value = '';
+async function submitPrevoteVote(name) {
+  if (appState.ownName && name === appState.ownName) return;
+  document.getElementById('prevote-vote-dropdown').style.display = 'none';
 
   const res = await api('vote', {
     code: appState.roomCode,
-    questionIdx: appState.currentQ,
+    questionIdx: appState.voterQ,
     voterName: appState.voterName,
     votedFor: name,
   });
 
   if (res.success) {
-    appState.hasVoted = true;
-    document.getElementById('vote-input').disabled = true;
-    document.getElementById('voted-confirm').style.display = 'block';
+    appState.voterQ++;
+    showPrevoteQuestion();
   }
 }
 
-// ── Next Question / Results ───────────────────────────────────────────────────
-
-async function nextQuestion() {
-  clearPoll();
-  const res = await api('next_question', { code: appState.roomCode });
-  if (!res.success) return;
-  appState.currentQ = res.state.currentQ;
-  appState.status = res.state.status;
-  if (appState.status === 'ended') {
-    await loadAndShowResults();
-  } else {
-    showQuestionScreen();
-  }
+// Called right after the voter finishes voting (still on the "prevote" screen,
+// showing the "danke, warte auf Auflösung" sub-state). Watches for the
+// moderator ending the game; voters never see the results themselves.
+function pollAfterVotingDone() {
+  pollInterval = setInterval(async () => {
+    const res = await api('get_room', { code: appState.roomCode });
+    if (!res.success) return;
+    const state = res.room.state;
+    if (state.status === 'ended') {
+      clearPoll();
+      appState.status = 'ended';
+      showScreen('voter-ended');
+    }
+  }, 2000);
 }
 
-async function goToResults() {
-  clearPoll();
-  await api('end_game', { code: appState.roomCode });
-  appState.status = 'ended';
-  await loadAndShowResults();
-}
+// ── Results (moderator only) ──────────────────────────────────────────────────
 
 async function loadAndShowResults() {
   allResults = [];
-  for (let i = 0; i <= appState.currentQ; i++) {
+  for (let i = 0; i < appState.questions.length; i++) {
     const res = await api('get_votes', { code: appState.roomCode, questionIdx: i });
     const votes = res.votes || [];
     const counts = {};
@@ -1366,13 +1351,15 @@ async function tryReconnect(session) {
     players: session.players,
     playerColors: session.playerColors,
     questions: session.questions,
-    currentQ: state.currentQ || 0,
     status: state.status || 'lobby',
-    hasVoted: false,
+    voterQ: 0,
   });
   showToast('🔄 Reconnected zu ' + session.roomCode);
-  if (appState.status === 'playing') showQuestionScreen();
-  else if (appState.status === 'ended') await loadAndShowResults();
+
+  if (appState.role === 'moderator' && appState.status === 'voting') showVotingModWait();
+  else if (appState.role === 'moderator' && appState.status === 'ended') await loadAndShowResults();
+  else if (appState.role === 'voter' && appState.status === 'voting') startPrevoteFlow();
+  else if (appState.role === 'voter' && appState.status === 'ended') showScreen('voter-ended');
   else showLobby();
   return true;
 }

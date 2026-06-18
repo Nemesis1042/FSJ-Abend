@@ -100,8 +100,6 @@ try {
         }
 
         case 'cleanup': {
-            // Tables are auto-created in getDB(); just purge old data here
-            // Delete old votes first (no FK cascade)
             $delVotes = $pdo->prepare("DELETE FROM votes WHERE room_code IN (
                 SELECT code FROM rooms WHERE created_at < datetime('now', '-24 hours')
             )");
@@ -136,13 +134,15 @@ try {
                 $attempts++;
             } while ($check->fetch() && $attempts < 20);
 
+            // status flow: lobby -> voting -> reveal -> ended
             $state = json_encode([
                 'players' => $players,
                 'questions' => $questions,
                 'colors' => $colors,
                 'status' => 'lobby',
-                'currentQ' => 0,
+                'revealIdx' => 0,
                 'joinedPlayers' => [],
+                'doneVoters' => [],
             ]);
 
             $stmt = $pdo->prepare("INSERT INTO rooms (code, state, created_at, updated_at) VALUES (?, ?, datetime('now'), datetime('now'))");
@@ -161,11 +161,11 @@ try {
             if (!$room) errorOut('Room not found', 404);
 
             $state = json_decode($room['state'], true);
-            $currentQ = $state['currentQ'] ?? 0;
+            $revealIdx = $state['revealIdx'] ?? 0;
 
-            // Get vote counts for current question
+            // Get vote counts for the question currently being revealed
             $voteStmt = $pdo->prepare("SELECT voted_for, COUNT(*) as cnt FROM votes WHERE room_code = ? AND question_idx = ? GROUP BY voted_for");
-            $voteStmt->execute([$code, $currentQ]);
+            $voteStmt->execute([$code, $revealIdx]);
             $voteCounts = [];
             while ($row = $voteStmt->fetch()) {
                 $voteCounts[$row['voted_for']] = (int)$row['cnt'];
@@ -231,9 +231,11 @@ try {
             jsonOut(['success' => true, 'votes' => $votes]);
         }
 
-        case 'next_question': {
+        case 'mark_voter_done': {
             $code = $body['code'] ?? '';
+            $voterName = $body['voterName'] ?? '';
             if (!$code) errorOut('code required');
+            if (!$voterName) errorOut('voterName required');
 
             $stmt = $pdo->prepare("SELECT state FROM rooms WHERE code = ?");
             $stmt->execute([$code]);
@@ -241,20 +243,14 @@ try {
             if (!$room) errorOut('Room not found', 404);
 
             $state = json_decode($room['state'], true);
-            $questions = $state['questions'] ?? [];
-            $currentQ = ($state['currentQ'] ?? 0) + 1;
-            $state['currentQ'] = $currentQ;
-
-            if ($currentQ >= count($questions) - 1) {
-                $state['status'] = 'ended';
-            } else {
-                $state['status'] = 'playing';
-            }
+            $done = $state['doneVoters'] ?? [];
+            if (!in_array($voterName, $done, true)) $done[] = $voterName;
+            $state['doneVoters'] = $done;
 
             $upd = $pdo->prepare("UPDATE rooms SET state = ?, updated_at = datetime('now') WHERE code = ?");
             $upd->execute([json_encode($state), $code]);
 
-            jsonOut(['success' => true, 'state' => $state]);
+            jsonOut(['success' => true]);
         }
 
         case 'end_game': {
