@@ -541,13 +541,11 @@
     </div>
 
     <div class="card">
-      <div class="section-title">Kategorien</div>
-      <div class="grid-2" id="cat-grid"></div>
-    </div>
-
-    <div class="card">
-      <div class="section-title">Fragenanzahl: <span class="slider-val" id="q-count-val">10</span></div>
-      <input type="range" id="q-count-slider" min="3" max="20" value="10" oninput="document.getElementById('q-count-val').textContent=this.value">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
+        <span class="section-title" style="margin-bottom:0;">Fragen auswählen</span>
+        <button class="btn-sm btn-secondary" onclick="toggleAllQuestions()" id="btn-toggle-all-q">Alle ✓</button>
+      </div>
+      <div id="question-list" style="display:flex;flex-direction:column;gap:8px;"></div>
     </div>
 
     <button class="btn-primary" onclick="createRoom()">🎯 Raum erstellen</button>
@@ -654,14 +652,21 @@ const ALL_NAMES = [
   'Leona Vollert','Kjell','Liam'
 ];
 
-const QUESTIONS = {
-  lustig: { icon:'😂', label:'Lustig & Chaotisch', questions:['verschlafen','den Bus zum Seminar verpassen','alle Namen vergessen','heimlich Snacks bunkern','eine Weltreise machen','spontan auswandern','Influencer werden','berühmt werden','eine eigene Firma gründen','Millionär werden','in einer Reality-Show landen','einen viralen TikTok posten'] },
-  seminar: { icon:'🏕️', label:'Seminar-Insider', questions:['noch ein zweites FSJ machen','später selbst Seminare leiten','Jugendreferent:in werden','immer eine Andacht vorbereiten','jedes Kennenlernspiel kennen','die Kindergruppe übernehmen','bei einer Freizeit die Ruhe bewahren','einen Programmpunkt improvisieren','beim Aufräumen als Letzte:r bleiben','die Gruppenkasse verlieren','als Erste:r Kaffee brauchen','in jeder Pause reden','als Letzte:r ins Bett gehen','die längste Diskussion starten','bei Energizern alles geben','den Gruppenchat zuspammen','die besten Seminarsprüche liefern','einen Workshop spontan übernehmen'] },
-  positiv: { icon:'💛', label:'Wertschätzung', questions:['alle zum Lachen bringen','jede Person integrieren','Streit schlichten','die beste Ansprechperson sein','immer helfen','eine motivierende Rede halten','die Welt verbessern','Ehrenamt und Beruf verbinden'] },
-  zukunft: { icon:'🚀', label:'Zukunft', questions:['Bürgermeister:in werden','Politiker:in werden','Lehrer:in werden','Sozialarbeiter:in werden','ein Buch schreiben','ein Café eröffnen','fünf Haustiere haben','in einer WG mit allen wohnen'] },
-  kreativ: { icon:'🧠', label:'Kreativ & Verrückt', questions:['eine Zombie-Apokalypse überleben','auf einer einsamen Insel klarkommen','einen Escape Room alleine lösen','eine geheime Superkraft besitzen','versehentlich berühmt werden','einen Schatz finden'] },
-  jasmin: { icon:'⭐', label:'Extras', questions:['die besten Memes machen','ein lebendes Meme sein','ein Alleskönner sein','den besten Workshop halten','die wildesten Gesprächsthemen bringen','das beste Zitat des Seminars liefern','das beste Paar abgeben','die beste Motivation versprühen','am ehesten in den Knast kommen 😅'] }
-};
+const ALL_QUESTIONS = [
+  'Millionär werden',
+  'in Reality TV landen',
+  'an seinem Lachen erkannt werden',
+  'ein lebendes Meme sein',
+  'in den Knast kommen 😅',
+  'sich beim Tischdienst eintragen',
+  'immer zu spät kommen',
+  'am motivierendsten sein',
+  'ein Alleskönner sein',
+  'in die Politik gehen',
+  'eine Zombie-Apokalypse auf einer einsamen Insel überleben',
+  'am besten singen',
+  'das beste Paar abgeben',
+];
 
 // ── App State ────────────────────────────────────────────────────────────────
 
@@ -817,16 +822,17 @@ function initSetup() {
     grid.appendChild(div);
   });
 
-  // Category grid
-  const catGrid = document.getElementById('cat-grid');
-  catGrid.innerHTML = '';
-  Object.entries(QUESTIONS).forEach(([key, cat]) => {
-    const div = document.createElement('div');
-    div.className = 'cat-card selected';
-    div.dataset.key = key;
-    div.innerHTML = `<div class="cat-icon">${cat.icon}</div><div class="cat-label">${cat.label}</div>`;
-    div.onclick = () => div.classList.toggle('selected');
-    catGrid.appendChild(div);
+  // Question checklist
+  const qList = document.getElementById('question-list');
+  qList.innerHTML = '';
+  ALL_QUESTIONS.forEach(q => {
+    const div = document.createElement('label');
+    div.className = 'name-check';
+    div.style.justifyContent = 'flex-start';
+    div.dataset.question = q;
+    div.innerHTML = `<input type="checkbox" value="${q}" checked onchange="syncNameCheck(this.closest('label'))"> <span style="white-space:normal;">Wer würde am ehesten… ${q}?</span>`;
+    div.classList.add('checked');
+    qList.appendChild(div);
   });
 
   // Extra name input
@@ -843,6 +849,15 @@ function syncNameCheck(label) {
 
 function toggleAllNames() {
   const checks = document.querySelectorAll('#name-grid input[type="checkbox"]');
+  const allChecked = [...checks].every(c => c.checked);
+  checks.forEach(c => {
+    c.checked = !allChecked;
+    syncNameCheck(c.closest('label'));
+  });
+}
+
+function toggleAllQuestions() {
+  const checks = document.querySelectorAll('#question-list input[type="checkbox"]');
   const allChecked = [...checks].every(c => c.checked);
   checks.forEach(c => {
     c.checked = !allChecked;
@@ -924,25 +939,15 @@ async function createRoom() {
   const players = [...checkedNames, ...extraNames];
   if (players.length < 2) { alert('Bitte mindestens 2 Spieler auswählen.'); return; }
 
-  // Collect selected categories
-  const selectedCats = [...document.querySelectorAll('#cat-grid .cat-card.selected')].map(d => d.dataset.key);
-  if (selectedCats.length === 0) { alert('Bitte mindestens eine Kategorie auswählen.'); return; }
+  // Collect checked questions
+  const questions = [...document.querySelectorAll('#question-list input[type="checkbox"]:checked')].map(c => ({ text: c.value }));
+  if (questions.length === 0) { alert('Bitte mindestens eine Frage auswählen.'); return; }
 
-  // Build question pool from selected categories — store {text, cat}
-  let pool = [];
-  selectedCats.forEach(key => {
-    QUESTIONS[key].questions.forEach(q => pool.push({ text: q, cat: key }));
-  });
-
-  // Shuffle pool
-  for (let i = pool.length - 1; i > 0; i--) {
+  // Shuffle order
+  for (let i = questions.length - 1; i > 0; i--) {
     const j = Math.floor(Math.random() * (i + 1));
-    [pool[i], pool[j]] = [pool[j], pool[i]];
+    [questions[i], questions[j]] = [questions[j], questions[i]];
   }
-
-  const count = parseInt(document.getElementById('q-count-slider').value);
-  const questions = pool.slice(0, Math.min(count, pool.length));
-  if (questions.length === 0) { alert('Keine Fragen verfügbar.'); return; }
 
   // Assign colors
   const playerColors = {};
@@ -1392,16 +1397,11 @@ function renderResults() {
   const list = document.getElementById('results-list');
   list.innerHTML = '';
 
-  // Gesamtsieger tally + per-category tally
+  // Gesamtsieger tally
   const totalTally = {};
-  const catTally = {};  // cat -> { name -> count }
   allResults.forEach(r => {
     Object.entries(r.counts).forEach(([name, cnt]) => {
       totalTally[name] = (totalTally[name] || 0) + cnt;
-      if (r.cat) {
-        if (!catTally[r.cat]) catTally[r.cat] = {};
-        catTally[r.cat][name] = (catTally[r.cat][name] || 0) + cnt;
-      }
     });
   });
 
@@ -1489,31 +1489,7 @@ function renderResults() {
     gsCard.style.display = 'none';
   }
 
-  // ── Meistgenannt pro Kategorie ────────────────────────────────────────────
-  const bdWrap = document.getElementById('cat-breakdown');
-  const bdList = document.getElementById('cat-breakdown-list');
-  const catKeys = Object.keys(catTally);
-  if (catKeys.length > 0) {
-    bdList.innerHTML = catKeys.map(cat => {
-      const catInfo = QUESTIONS[cat];
-      if (!catInfo) return '';
-      const entries = Object.entries(catTally[cat]).sort((a, b) => b[1] - a[1]);
-      if (entries.length === 0) return '';
-      const [winnerName, winnerCnt] = entries[0];
-      const color = appState.playerColors[winnerName] || '#fff';
-      return `<div class="cat-result-card">
-        <div class="cat-result-icon">${catInfo.icon}</div>
-        <div style="flex:1;min-width:0;">
-          <div class="cat-result-label">${catInfo.label}</div>
-          <div class="cat-result-winner" style="color:${color};">${winnerName}</div>
-        </div>
-        <div style="font-size:0.85rem;color:var(--muted);flex-shrink:0;">${winnerCnt}×</div>
-      </div>`;
-    }).join('');
-    bdWrap.style.display = 'block';
-  } else {
-    bdWrap.style.display = 'none';
-  }
+  document.getElementById('cat-breakdown').style.display = 'none';
 }
 
 async function takeScreenshot() {
