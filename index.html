@@ -373,6 +373,23 @@
   .podium-count { font-size: 0.75rem; color: var(--muted); }
   .podium-block { border-radius: 8px 8px 0 0; width: 80px; background: rgba(255,255,255,0.07); }
 
+  /* Presentation views (moderator-facing reveal & final results, shown on a beamer) */
+  #screen-reveal .question-prefix { font-size: 1.3rem; }
+  #screen-reveal .question-text { font-size: 2.2rem; }
+  #screen-reveal .q-progress { font-size: 1.1rem; }
+  #screen-reveal .podium-row, #screen-results .podium-row { gap: 24px; margin: 28px 0 14px; }
+  #screen-reveal .podium-medal, #screen-results .podium-medal { font-size: 3.2rem; }
+  #screen-reveal .podium-name, #screen-results .podium-name { font-size: 2.1rem; max-width: 160px; }
+  #screen-reveal .podium-count, #screen-results .podium-count { font-size: 1.2rem; }
+  #screen-reveal .podium-block, #screen-results .podium-block { width: 130px; }
+  #screen-results .gesamtsieger-label { font-size: 1.1rem; }
+  #screen-results .gesamtsieger-count { font-size: 1.2rem; }
+  #screen-results .result-question { font-size: 1.1rem; }
+  #screen-results .pie-legend-item { font-size: 1.1rem; }
+  #screen-results .pie-legend-pct { font-size: 1rem; }
+  #screen-reveal .section-title, #screen-results h2 { font-size: 1.5rem; }
+  #screen-reveal button, #screen-results button { font-size: 1.2rem; padding: 18px 20px; }
+
   /* Category breakdown */
   .cat-result-card { background: var(--card2); border-radius: 12px; padding: 14px 16px; display: flex; align-items: center; gap: 12px; }
   .cat-result-icon { font-size: 1.5rem; flex-shrink: 0; }
@@ -1076,7 +1093,7 @@ function showRevealScreen() {
 
 function buildPodiumHtml(entries) {
   const medals = ['🥇','🥈','🥉'];
-  const heights = [80, 60, 44];
+  const heights = [130, 100, 72];
   const top3 = entries.slice(0, 3);
 
   // Reorder visually: 2nd, 1st, 3rd
