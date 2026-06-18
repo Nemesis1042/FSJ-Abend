@@ -545,7 +545,7 @@
       <p class="text-muted">Jede:r stimmt in eigenem Tempo über alle Fragen ab. Nur du siehst die Auswertung.</p>
       <p class="text-green" style="margin-top:10px;" id="voting-mod-done-count">0 / 0 fertig</p>
     </div>
-    <button class="btn-pink" onclick="finishVoting()">🏆 Abstimmung beenden &amp; Auswertung anzeigen</button>
+    <button class="btn-pink" onclick="startReveal()">🎭 Abstimmung beenden &amp; Auswertung starten</button>
   </div>
 
   <!-- VOTER: game ended, no results shown to voters -->
@@ -554,6 +554,34 @@
       <div style="font-size:2rem;">🎬</div>
       <div class="section-title" style="margin-top:8px;">Die Abstimmung ist beendet!</div>
       <p class="text-muted">Die Auswertung zeigt nur die Moderation – schau auf den Beamer.</p>
+    </div>
+  </div>
+
+  <!-- MODERATOR: reveal results question by question -->
+  <div id="screen-reveal" class="screen pb-safe">
+    <div class="card" style="background: var(--card2);">
+      <div class="q-progress" id="reveal-progress">Frage 1 von 10</div>
+      <div style="margin-top:8px;">
+        <span class="question-prefix">Wer würde am ehesten…</span>
+        <div class="question-text" id="reveal-q-text">—</div>
+      </div>
+    </div>
+
+    <div class="card" id="reveal-prereveal-wrap">
+      <div class="text-center waiting-pulse">🤫 Noch nicht aufgelöst…</div>
+    </div>
+
+    <div class="card" id="reveal-result-wrap" style="display:none;">
+      <div class="section-title">Ergebnis</div>
+      <div class="pie-wrap" id="reveal-pie-wrap" style="min-height:60px;">
+        <div class="text-muted" id="reveal-empty" style="padding:12px 0;">Keine Stimmen</div>
+        <canvas id="reveal-canvas" width="220" height="220" style="display:none;"></canvas>
+        <div class="pie-legend" id="reveal-legend"></div>
+      </div>
+    </div>
+
+    <div id="reveal-btn-wrap">
+      <button class="btn-pink" onclick="revealCurrent()" id="reveal-btn">🎭 Auflösen</button>
     </div>
   </div>
 
@@ -617,6 +645,7 @@ const appState = {
   playerColors: {},   // name -> color
   questions: [],
   voterQ: 0,           // voter's own progress through questions
+  revealIdx: 0,        // moderator's reveal progress
   status: 'lobby',
 };
 
@@ -645,6 +674,14 @@ function beep(freq, startTime, duration, gain = 0.15, type = 'sine') {
   gainNode.connect(ctx.destination);
   osc.start(startTime);
   osc.stop(startTime + duration);
+}
+
+function playDrumroll() {
+  const ctx = getAudioCtx();
+  const now = ctx.currentTime;
+  for (let i = 0; i < 12; i++) {
+    beep(120 + Math.random() * 30, now + i * 0.08, 0.07, 0.12, 'triangle');
+  }
 }
 
 function playFanfare() {
@@ -677,7 +714,7 @@ function showScreen(name) {
   document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
   document.getElementById('screen-' + name).classList.add('active');
   const badge = document.getElementById('floating-code');
-  if (['prevote', 'voting-mod'].includes(name) && appState.roomCode) {
+  if (['prevote', 'voting-mod', 'reveal'].includes(name) && appState.roomCode) {
     badge.textContent = appState.roomCode;
     badge.style.display = 'block';
   } else {
@@ -930,7 +967,7 @@ async function joinRoom() {
 
   if (appState.status === 'voting') {
     startPrevoteFlow();
-  } else if (appState.status === 'ended') {
+  } else if (appState.status === 'ended' || appState.status === 'reveal') {
     showScreen('voter-ended');
   } else {
     showLobby();
@@ -1022,8 +1059,75 @@ function pollVotingMod() {
   }, 2000);
 }
 
-async function finishVoting() {
+async function startReveal() {
   clearPoll();
+  await api('update_room', { code: appState.roomCode, fields: { status: 'reveal', revealIdx: 0 } });
+  appState.status = 'reveal';
+  appState.revealIdx = 0;
+  showRevealScreen();
+}
+
+function showRevealScreen() {
+  showScreen('reveal');
+  const q = appState.questions[appState.revealIdx];
+  document.getElementById('reveal-progress').textContent = `Frage ${appState.revealIdx + 1} von ${appState.questions.length}`;
+  document.getElementById('reveal-q-text').textContent = q?.text ?? q;
+  document.getElementById('reveal-prereveal-wrap').style.display = 'block';
+  document.getElementById('reveal-result-wrap').style.display = 'none';
+  document.getElementById('reveal-btn-wrap').innerHTML = '<button class="btn-pink" onclick="revealCurrent()" id="reveal-btn">🎭 Auflösen</button>';
+}
+
+async function revealCurrent() {
+  playDrumroll();
+  const res = await api('get_votes', { code: appState.roomCode, questionIdx: appState.revealIdx });
+  const votes = res.votes || [];
+  const counts = {};
+  votes.forEach(v => { counts[v.voted_for] = (counts[v.voted_for] || 0) + 1; });
+  const sorted = Object.entries(counts).filter(([, c]) => c > 0).sort((a, b) => b[1] - a[1]);
+  const total = sorted.reduce((a, [, c]) => a + c, 0);
+
+  setTimeout(() => {
+    document.getElementById('reveal-prereveal-wrap').style.display = 'none';
+    document.getElementById('reveal-result-wrap').style.display = 'block';
+
+    const emptyEl = document.getElementById('reveal-empty');
+    const canvas = document.getElementById('reveal-canvas');
+    const legend = document.getElementById('reveal-legend');
+
+    if (sorted.length === 0) {
+      emptyEl.style.display = 'block';
+      canvas.style.display = 'none';
+      legend.innerHTML = '';
+    } else {
+      emptyEl.style.display = 'none';
+      canvas.style.display = 'block';
+      drawResultPie('reveal-canvas', sorted, appState.playerColors, total);
+      legend.innerHTML = sorted.map(([name, cnt]) => {
+        const pct = Math.round(cnt / total * 100);
+        const color = appState.playerColors[name] || '#fff';
+        return `<div class="pie-legend-item">
+          <span class="pie-legend-dot" style="background:${color};"></span>
+          <span class="pie-legend-name">${name}</span>
+          <span class="pie-legend-pct">${pct}% (${cnt})</span>
+        </div>`;
+      }).join('');
+      playFanfare();
+    }
+
+    const isLast = appState.revealIdx >= appState.questions.length - 1;
+    document.getElementById('reveal-btn-wrap').innerHTML = isLast
+      ? '<button class="btn-pink" onclick="finishReveal()">🏆 Zur Gesamtauswertung</button>'
+      : '<button class="btn-primary" onclick="nextRevealQuestion()">Nächste Frage ▶</button>';
+  }, 900);
+}
+
+async function nextRevealQuestion() {
+  appState.revealIdx++;
+  await api('update_room', { code: appState.roomCode, fields: { revealIdx: appState.revealIdx } });
+  showRevealScreen();
+}
+
+async function finishReveal() {
   await api('end_game', { code: appState.roomCode });
   appState.status = 'ended';
   await loadAndShowResults();
@@ -1124,9 +1228,9 @@ function pollAfterVotingDone() {
     const res = await api('get_room', { code: appState.roomCode });
     if (!res.success) return;
     const state = res.room.state;
-    if (state.status === 'ended') {
+    if (state.status === 'ended' || state.status === 'reveal') {
       clearPoll();
-      appState.status = 'ended';
+      appState.status = state.status;
       showScreen('voter-ended');
     }
   }, 2000);
@@ -1353,13 +1457,15 @@ async function tryReconnect(session) {
     questions: session.questions,
     status: state.status || 'lobby',
     voterQ: 0,
+    revealIdx: state.revealIdx || 0,
   });
   showToast('🔄 Reconnected zu ' + session.roomCode);
 
   if (appState.role === 'moderator' && appState.status === 'voting') showVotingModWait();
+  else if (appState.role === 'moderator' && appState.status === 'reveal') showRevealScreen();
   else if (appState.role === 'moderator' && appState.status === 'ended') await loadAndShowResults();
   else if (appState.role === 'voter' && appState.status === 'voting') startPrevoteFlow();
-  else if (appState.role === 'voter' && appState.status === 'ended') showScreen('voter-ended');
+  else if (appState.role === 'voter' && (appState.status === 'ended' || appState.status === 'reveal')) showScreen('voter-ended');
   else showLobby();
   return true;
 }
