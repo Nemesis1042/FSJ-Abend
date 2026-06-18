@@ -707,45 +707,6 @@ let pollInterval = null;
 let extraNames = [];
 let allResults = [];   // [{question, votes:[{voted_for,cnt}]}] collected at results time
 
-// ── Sound Effects (Web Audio API, no files needed) ─────────────────────────────
-
-let audioCtx = null;
-function getAudioCtx() {
-  if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-  if (audioCtx.state === 'suspended') audioCtx.resume();
-  return audioCtx;
-}
-
-function beep(freq, startTime, duration, gain = 0.15, type = 'sine') {
-  const ctx = getAudioCtx();
-  const osc = ctx.createOscillator();
-  const gainNode = ctx.createGain();
-  osc.type = type;
-  osc.frequency.value = freq;
-  gainNode.gain.setValueAtTime(gain, startTime);
-  gainNode.gain.exponentialRampToValueAtTime(0.001, startTime + duration);
-  osc.connect(gainNode);
-  gainNode.connect(ctx.destination);
-  osc.start(startTime);
-  osc.stop(startTime + duration);
-}
-
-function playDrumroll() {
-  const ctx = getAudioCtx();
-  const now = ctx.currentTime;
-  for (let i = 0; i < 12; i++) {
-    beep(120 + Math.random() * 30, now + i * 0.08, 0.07, 0.12, 'triangle');
-  }
-}
-
-function playFanfare() {
-  const ctx = getAudioCtx();
-  const now = ctx.currentTime;
-  const notes = [523.25, 659.25, 783.99, 1046.50]; // C5 E5 G5 C6
-  notes.forEach((f, i) => beep(f, now + i * 0.12, 0.35, 0.15, 'triangle'));
-  beep(1046.50, now + 0.48, 0.6, 0.18, 'triangle');
-}
-
 // ── API ──────────────────────────────────────────────────────────────────────
 
 function getApiUrl() {
@@ -981,7 +942,6 @@ async function createRoom() {
 // ── Join Room ─────────────────────────────────────────────────────────────────
 
 async function joinRoom() {
-  getAudioCtx(); // unlock audio on user gesture
   const code = document.getElementById('join-code').value.trim().toUpperCase();
   if (code.length !== 5) { alert('Bitte 5-stelligen Raumcode eingeben.'); return; }
 
@@ -1089,7 +1049,6 @@ function updateLobbyPlayerList(list) {
 }
 
 async function startVoting() {
-  getAudioCtx(); // unlock audio on user gesture
   await api('update_room', { code: appState.roomCode, fields: { status: 'voting' } });
   appState.status = 'voting';
   showVotingModWait();
@@ -1188,7 +1147,6 @@ function animatePodium(container) {
 }
 
 async function revealCurrent() {
-  playDrumroll();
   document.getElementById('reveal-btn-wrap').innerHTML = '';
   document.getElementById('reveal-prereveal-wrap').innerHTML = '<div class="text-center drumroll-text">🥁 Wer ist es wohl…?</div>';
 
@@ -1212,7 +1170,6 @@ async function revealCurrent() {
       emptyEl.style.display = 'none';
       podiumRow.innerHTML = buildPodiumHtml(sorted);
       animatePodium(podiumRow);
-      playFanfare();
       spawnConfetti();
     }
 
@@ -1357,7 +1314,6 @@ async function loadAndShowResults() {
 
   renderResults();
   showScreen('results');
-  playFanfare();
 }
 
 // ── Results Rendering ─────────────────────────────────────────────────────────
