@@ -237,65 +237,6 @@
     width: 100%;
   }
 
-  /* Leader display */
-  .leader-wrap {
-    text-align: center;
-    padding: 20px;
-    border-radius: 16px;
-    transition: background 0.5s;
-    position: relative;
-    overflow: hidden;
-  }
-  .leader-crown { font-size: 2rem; }
-  .leader-name {
-    font-family: 'Bebas Neue', sans-serif;
-    font-size: 3.5rem;
-    line-height: 1;
-    transition: color 0.4s;
-    word-break: break-word;
-  }
-  .leader-votes { font-size: 0.9rem; color: var(--muted); margin-top: 4px; }
-
-  /* Particles */
-  .particles-container { position: absolute; inset: 0; pointer-events: none; overflow: hidden; }
-  .particle {
-    position: absolute;
-    font-size: 1.2rem;
-    animation: float-up 1.6s ease-out forwards;
-  }
-  @keyframes float-up {
-    0%   { opacity: 0; transform: translateY(60px) scale(0.5); }
-    20%  { opacity: 1; }
-    100% { opacity: 0; transform: translateY(-80px) scale(1.2); }
-  }
-
-  /* Bar chart */
-  .bar-chart { display: flex; flex-direction: column; gap: 8px; }
-  .bar-row { display: flex; align-items: center; gap: 8px; }
-  .bar-name { font-size: 0.8rem; width: 90px; flex-shrink: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  .bar-track { flex: 1; background: #12122a; border-radius: 100px; height: 20px; overflow: hidden; }
-  .bar-fill {
-    height: 100%;
-    border-radius: 100px;
-    transition: width 0.5s ease;
-    min-width: 4px;
-    position: relative;
-    overflow: hidden;
-  }
-  .bar-fill.leading::after {
-    content: '';
-    position: absolute;
-    inset: 0;
-    background: linear-gradient(90deg, transparent 0%, rgba(255,255,255,0.25) 50%, transparent 100%);
-    background-size: 200% 100%;
-    animation: shimmer 1.4s infinite;
-  }
-  @keyframes shimmer {
-    0%   { background-position: -200% 0; }
-    100% { background-position: 200% 0; }
-  }
-  .bar-count { font-size: 0.8rem; width: 24px; text-align: right; color: var(--muted); flex-shrink: 0; }
-
   /* Question screen */
   .question-text {
     font-size: 1.3rem;
@@ -591,11 +532,10 @@
       <div style="text-align:right;font-size:0.8rem;color:var(--muted);margin-top:4px;" id="timer-label">30s</div>
     </div>
 
-    <div class="leader-wrap card" id="leader-wrap" style="background:var(--card);">
-      <div class="particles-container" id="particles-container"></div>
-      <div class="leader-crown" id="leader-crown" style="visibility:hidden;">👑</div>
-      <div class="leader-name" id="leader-name" style="color:var(--muted);">—</div>
-      <div class="leader-votes" id="leader-votes"></div>
+    <div class="card text-center" id="voting-status-card" style="background:var(--card);">
+      <div style="font-size:2rem;">🤫</div>
+      <div class="section-title" style="margin-top:8px;margin-bottom:0;">Abstimmung läuft…</div>
+      <p class="text-muted" style="margin-top:4px;">Ergebnisse werden erst am Ende aller Fragen aufgelöst.</p>
     </div>
 
     <!-- Voter input -->
@@ -607,16 +547,8 @@
       <div id="voted-confirm" style="display:none;" class="voted-confirm">✓ Stimme abgegeben!</div>
     </div>
 
-    <!-- Moderator live pie -->
+    <!-- Moderator controls -->
     <div id="mod-bar-wrap">
-      <div class="card">
-        <div class="section-title">Live-Ergebnis</div>
-        <div class="pie-wrap" id="q-live-pie-wrap" style="min-height:60px;">
-          <div class="text-muted" id="q-live-empty" style="padding:12px 0;">Noch keine Stimmen…</div>
-          <canvas id="q-live-canvas" width="220" height="220" style="display:none;"></canvas>
-          <div class="pie-legend" id="q-live-legend"></div>
-        </div>
-      </div>
       <div id="mod-next-btn-wrap" style="margin-top:8px;"></div>
     </div>
   </div>
@@ -688,7 +620,6 @@ const appState = {
 let pollInterval = null;
 let timerInterval = null;
 let timerSecondsLeft = 45;
-let prevLeaderName = null;
 let extraNames = [];
 let allResults = [];   // [{question, votes:[{voted_for,cnt}]}] collected at results time
 
@@ -1099,7 +1030,6 @@ async function startGame() {
 function showQuestionScreen() {
   clearPoll();
   clearTimer();
-  prevLeaderName = null;
   appState.hasVoted = false;
 
   showScreen('question');
@@ -1191,98 +1121,7 @@ function pollQuestion() {
       await loadAndShowResults();
       return;
     }
-
-    // Update UI
-    const total = Object.values(voteCounts).reduce((a, b) => a + b, 0);
-    updateLeader(appState.players, voteCounts, total);
-    if (appState.role === 'moderator') {
-      updateBarChart(appState.players, voteCounts, total);
-    }
   }, 1500);
-}
-
-function updateLeader(players, voteCounts, total) {
-  let topName = null;
-  let topCount = 0;
-  players.forEach(p => {
-    const c = voteCounts[p] || 0;
-    if (c > topCount) { topCount = c; topName = p; }
-  });
-
-  const leaderNameEl = document.getElementById('leader-name');
-  const leaderVotesEl = document.getElementById('leader-votes');
-  const leaderCrownEl = document.getElementById('leader-crown');
-  const leaderWrap = document.getElementById('leader-wrap');
-
-  if (!topName || topCount === 0) {
-    leaderNameEl.textContent = '—';
-    leaderNameEl.style.color = 'var(--muted)';
-    leaderCrownEl.style.visibility = 'hidden';
-    leaderVotesEl.textContent = '';
-    leaderWrap.style.background = 'var(--card)';
-    return;
-  }
-
-  const color = appState.playerColors[topName] || '#fff';
-  leaderNameEl.textContent = topName;
-  leaderNameEl.style.color = color;
-  leaderCrownEl.style.visibility = 'visible';
-  leaderVotesEl.textContent = `${topCount} Stimme${topCount !== 1 ? 'n' : ''}`;
-  leaderWrap.style.background = color + '18';
-
-  if (topName !== prevLeaderName) {
-    if (prevLeaderName !== null) {
-      spawnParticles();
-    }
-    prevLeaderName = topName;
-  }
-}
-
-function spawnParticles() {
-  const container = document.getElementById('particles-container');
-  const emojis = ['⭐','✨','🎉','💫','🔥'];
-  for (let i = 0; i < 8; i++) {
-    const p = document.createElement('span');
-    p.className = 'particle';
-    p.textContent = emojis[Math.floor(Math.random() * emojis.length)];
-    p.style.left = Math.random() * 90 + '%';
-    p.style.bottom = '0';
-    p.style.animationDelay = (Math.random() * 0.4) + 's';
-    container.appendChild(p);
-    setTimeout(() => p.remove(), 2200);
-  }
-}
-
-function updateBarChart(players, voteCounts, total) {
-  const sorted = Object.entries(voteCounts)
-    .filter(([, c]) => c > 0)
-    .sort((a, b) => b[1] - a[1]);
-
-  const emptyEl = document.getElementById('q-live-empty');
-  const canvas  = document.getElementById('q-live-canvas');
-  const legend  = document.getElementById('q-live-legend');
-
-  if (sorted.length === 0) {
-    emptyEl.style.display = 'block';
-    canvas.style.display  = 'none';
-    legend.innerHTML = '';
-    return;
-  }
-
-  emptyEl.style.display = 'none';
-  canvas.style.display  = 'block';
-
-  drawResultPie('q-live-canvas', sorted, appState.playerColors, total);
-
-  legend.innerHTML = sorted.map(([name, cnt]) => {
-    const pct   = Math.round(cnt / total * 100);
-    const color = appState.playerColors[name] || '#fff';
-    return `<div class="pie-legend-item">
-      <span class="pie-legend-dot" style="background:${color};"></span>
-      <span class="pie-legend-name">${name}</span>
-      <span class="pie-legend-pct">${pct}% (${cnt})</span>
-    </div>`;
-  }).join('');
 }
 
 // ── Vote Input (Voter) ────────────────────────────────────────────────────────
