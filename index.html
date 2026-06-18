@@ -572,12 +572,9 @@
     </div>
 
     <div class="card" id="reveal-result-wrap" style="display:none;">
-      <div class="section-title">Ergebnis</div>
-      <div class="pie-wrap" id="reveal-pie-wrap" style="min-height:60px;">
-        <div class="text-muted" id="reveal-empty" style="padding:12px 0;">Keine Stimmen</div>
-        <canvas id="reveal-canvas" width="220" height="220" style="display:none;"></canvas>
-        <div class="pie-legend" id="reveal-legend"></div>
-      </div>
+      <div class="section-title text-center">Ergebnis</div>
+      <div class="text-muted text-center" id="reveal-empty" style="padding:12px 0;display:none;">Keine Stimmen</div>
+      <div class="podium-row" id="reveal-podium-row"></div>
     </div>
 
     <div id="reveal-btn-wrap">
@@ -1077,6 +1074,29 @@ function showRevealScreen() {
   document.getElementById('reveal-btn-wrap').innerHTML = '<button class="btn-pink" onclick="revealCurrent()" id="reveal-btn">🎭 Auflösen</button>';
 }
 
+function buildPodiumHtml(entries) {
+  const medals = ['🥇','🥈','🥉'];
+  const heights = [80, 60, 44];
+  const top3 = entries.slice(0, 3);
+
+  // Reorder visually: 2nd, 1st, 3rd
+  const order = top3.length >= 2
+    ? [top3[1], top3[0], top3[2]].filter(Boolean)
+    : [top3[0]];
+  const orderMedals = top3.length >= 2 ? ['🥈','🥇','🥉'] : ['🥇'];
+  const orderHeights = top3.length >= 2 ? [heights[1], heights[0], heights[2]] : [heights[0]];
+
+  return order.map(([name, cnt], i) => {
+    const color = appState.playerColors[name] || '#fff';
+    return `<div class="podium-slot" style="transition-delay:${0.1 + i * 0.15}s;">
+      <div class="podium-medal">${orderMedals[i]}</div>
+      <div class="podium-name" style="color:${color};text-shadow:0 0 10px ${color}66;">${name.split(' ')[0]}</div>
+      <div class="podium-count">${cnt}×</div>
+      <div class="podium-block" style="height:${orderHeights[i]}px;background:${color}22;border-top:2px solid ${color}66;"></div>
+    </div>`;
+  }).join('');
+}
+
 async function revealCurrent() {
   playDrumroll();
   const res = await api('get_votes', { code: appState.roomCode, questionIdx: appState.revealIdx });
@@ -1084,33 +1104,25 @@ async function revealCurrent() {
   const counts = {};
   votes.forEach(v => { counts[v.voted_for] = (counts[v.voted_for] || 0) + 1; });
   const sorted = Object.entries(counts).filter(([, c]) => c > 0).sort((a, b) => b[1] - a[1]);
-  const total = sorted.reduce((a, [, c]) => a + c, 0);
 
   setTimeout(() => {
     document.getElementById('reveal-prereveal-wrap').style.display = 'none';
     document.getElementById('reveal-result-wrap').style.display = 'block';
 
     const emptyEl = document.getElementById('reveal-empty');
-    const canvas = document.getElementById('reveal-canvas');
-    const legend = document.getElementById('reveal-legend');
+    const podiumRow = document.getElementById('reveal-podium-row');
 
     if (sorted.length === 0) {
       emptyEl.style.display = 'block';
-      canvas.style.display = 'none';
-      legend.innerHTML = '';
+      podiumRow.innerHTML = '';
     } else {
       emptyEl.style.display = 'none';
-      canvas.style.display = 'block';
-      drawResultPie('reveal-canvas', sorted, appState.playerColors, total);
-      legend.innerHTML = sorted.map(([name, cnt]) => {
-        const pct = Math.round(cnt / total * 100);
-        const color = appState.playerColors[name] || '#fff';
-        return `<div class="pie-legend-item">
-          <span class="pie-legend-dot" style="background:${color};"></span>
-          <span class="pie-legend-name">${name}</span>
-          <span class="pie-legend-pct">${pct}% (${cnt})</span>
-        </div>`;
-      }).join('');
+      podiumRow.innerHTML = buildPodiumHtml(sorted);
+      requestAnimationFrame(() => {
+        requestAnimationFrame(() => {
+          podiumRow.querySelectorAll('.podium-slot').forEach(el => el.classList.add('visible'));
+        });
+      });
       playFanfare();
     }
 
@@ -1315,32 +1327,12 @@ function renderResults() {
   const topEntries = Object.entries(totalTally).sort((a, b) => b[1] - a[1]);
   const gsCard = document.getElementById('gesamtsieger-card');
   if (topEntries.length > 0) {
-    const medals = ['🥇','🥈','🥉'];
-    const heights = [80, 60, 44];
-    const top3 = topEntries.slice(0, 3);
-
-    // Reorder visually: 2nd, 1st, 3rd
-    const order = top3.length >= 2
-      ? [top3[1], top3[0], top3[2]].filter(Boolean)
-      : [top3[0]];
-    const orderMedals = top3.length >= 2 ? ['🥈','🥇','🥉'] : ['🥇'];
-    const orderHeights = top3.length >= 2 ? [heights[1], heights[0], heights[2]] : [heights[0]];
-
     const [gsName, gsCount] = topEntries[0];
-    const gsColor = appState.playerColors[gsName] || '#fff';
 
     gsCard.innerHTML = `
       <div class="gesamtsieger-label">👑 Gesamtsieger:in</div>
       <div class="podium-row" id="podium-row">
-        ${order.map(([name, cnt], i) => {
-          const color = appState.playerColors[name] || '#fff';
-          return `<div class="podium-slot" style="transition-delay:${0.1 + i * 0.15}s;">
-            <div class="podium-medal">${orderMedals[i]}</div>
-            <div class="podium-name" style="color:${color};text-shadow:0 0 10px ${color}66;">${name.split(' ')[0]}</div>
-            <div class="podium-count">${cnt}×</div>
-            <div class="podium-block" style="height:${orderHeights[i]}px;background:${color}22;border-top:2px solid ${color}66;"></div>
-          </div>`;
-        }).join('')}
+        ${buildPodiumHtml(topEntries)}
       </div>
       <div class="gesamtsieger-count" style="margin-top:0;">${gsName} wurde ${gsCount}× gewählt</div>
     `;
