@@ -378,12 +378,39 @@
 
   /* Podium */
   .podium-row { display: flex; justify-content: center; align-items: flex-end; gap: 12px; margin: 16px 0 8px; }
-  .podium-slot { display: flex; flex-direction: column; align-items: center; gap: 4px; opacity: 0; transform: translateY(30px); transition: opacity 0.5s, transform 0.5s; }
-  .podium-slot.visible { opacity: 1; transform: translateY(0); }
+  .podium-slot {
+    display: flex; flex-direction: column; align-items: center; gap: 4px;
+    opacity: 0; transform: translateY(40px) scale(0.6);
+    transition: opacity 0.45s ease-out, transform 0.45s cubic-bezier(.34,1.56,.64,1);
+  }
+  .podium-slot.visible { opacity: 1; transform: translateY(0) scale(1); }
   .podium-medal { font-size: 1.8rem; }
   .podium-name { font-family: 'Bebas Neue', sans-serif; font-size: 1.3rem; line-height: 1; text-align: center; word-break: break-word; max-width: 100px; }
   .podium-count { font-size: 0.75rem; color: var(--muted); }
-  .podium-block { border-radius: 8px 8px 0 0; width: 80px; background: rgba(255,255,255,0.07); }
+  .podium-block { border-radius: 8px 8px 0 0; width: 80px; background: rgba(255,255,255,0.07); transition: height 0.5s ease-out; }
+
+  /* Drumroll suspense text before a reveal */
+  .drumroll-text { font-size: 1.6rem; font-weight: 700; animation: drumroll-shake 0.25s ease-in-out infinite; }
+  @keyframes drumroll-shake {
+    0%, 100% { transform: translateX(0) rotate(0deg); }
+    25% { transform: translateX(-4px) rotate(-3deg); }
+    75% { transform: translateX(4px) rotate(3deg); }
+  }
+
+  /* Confetti burst on reveal */
+  .confetti-piece {
+    position: fixed;
+    top: -20px;
+    width: 10px;
+    height: 16px;
+    z-index: 9998;
+    pointer-events: none;
+    animation: confetti-fall linear forwards;
+  }
+  @keyframes confetti-fall {
+    0% { transform: translateY(0) rotate(0deg); opacity: 1; }
+    100% { transform: translateY(100vh) rotate(540deg); opacity: 0.9; }
+  }
 
   /* Presentation views (moderator-facing reveal & final results, shown on a beamer) */
   #screen-reveal .question-prefix { font-size: 1.3rem; }
@@ -1107,9 +1134,25 @@ function showRevealScreen() {
   const q = appState.questions[appState.revealIdx];
   document.getElementById('reveal-progress').textContent = `Frage ${appState.revealIdx + 1} von ${appState.questions.length}`;
   document.getElementById('reveal-q-text').textContent = q?.text ?? q;
-  document.getElementById('reveal-prereveal-wrap').style.display = 'block';
+  const prereveal = document.getElementById('reveal-prereveal-wrap');
+  prereveal.innerHTML = '<div class="text-center waiting-pulse">🤫 Noch nicht aufgelöst…</div>';
+  prereveal.style.display = 'block';
   document.getElementById('reveal-result-wrap').style.display = 'none';
   document.getElementById('reveal-btn-wrap').innerHTML = '<button class="btn-pink" onclick="revealCurrent()" id="reveal-btn">🎭 Auflösen</button>';
+}
+
+function spawnConfetti(count = 60) {
+  const colors = ['#ff3d6e','#7b61ff','#00e5a0','#ff9f43','#54a0ff','#feca57'];
+  for (let i = 0; i < count; i++) {
+    const piece = document.createElement('div');
+    piece.className = 'confetti-piece';
+    piece.style.left = Math.random() * 100 + 'vw';
+    piece.style.background = colors[Math.floor(Math.random() * colors.length)];
+    piece.style.animationDuration = (1.8 + Math.random() * 1.4) + 's';
+    piece.style.animationDelay = (Math.random() * 0.3) + 's';
+    document.body.appendChild(piece);
+    setTimeout(() => piece.remove(), 3500);
+  }
 }
 
 function buildPodiumHtml(entries) {
@@ -1130,13 +1173,25 @@ function buildPodiumHtml(entries) {
       <div class="podium-medal">${orderMedals[i]}</div>
       <div class="podium-name" style="color:${color};text-shadow:0 0 10px ${color}66;">${name.split(' ')[0]}</div>
       <div class="podium-count">${cnt}×</div>
-      <div class="podium-block" style="height:${orderHeights[i]}px;background:${color}22;border-top:2px solid ${color}66;"></div>
+      <div class="podium-block" data-height="${orderHeights[i]}" style="height:0;background:${color}22;border-top:2px solid ${color}66;transition-delay:${0.1 + i * 0.15}s;"></div>
     </div>`;
   }).join('');
 }
 
+function animatePodium(container) {
+  requestAnimationFrame(() => {
+    requestAnimationFrame(() => {
+      container.querySelectorAll('.podium-slot').forEach(el => el.classList.add('visible'));
+      container.querySelectorAll('.podium-block').forEach(el => { el.style.height = el.dataset.height + 'px'; });
+    });
+  });
+}
+
 async function revealCurrent() {
   playDrumroll();
+  document.getElementById('reveal-btn-wrap').innerHTML = '';
+  document.getElementById('reveal-prereveal-wrap').innerHTML = '<div class="text-center drumroll-text">🥁 Wer ist es wohl…?</div>';
+
   const res = await api('get_votes', { code: appState.roomCode, questionIdx: appState.revealIdx });
   const votes = res.votes || [];
   const counts = {};
@@ -1156,19 +1211,16 @@ async function revealCurrent() {
     } else {
       emptyEl.style.display = 'none';
       podiumRow.innerHTML = buildPodiumHtml(sorted);
-      requestAnimationFrame(() => {
-        requestAnimationFrame(() => {
-          podiumRow.querySelectorAll('.podium-slot').forEach(el => el.classList.add('visible'));
-        });
-      });
+      animatePodium(podiumRow);
       playFanfare();
+      spawnConfetti();
     }
 
     const isLast = appState.revealIdx >= appState.questions.length - 1;
     document.getElementById('reveal-btn-wrap').innerHTML = isLast
       ? '<button class="btn-pink" onclick="finishReveal()">🏆 Zur Gesamtauswertung</button>'
       : '<button class="btn-primary" onclick="nextRevealQuestion()">Nächste Frage ▶</button>';
-  }, 900);
+  }, 1400);
 }
 
 async function nextRevealQuestion() {
@@ -1376,12 +1428,7 @@ function renderResults() {
     `;
     gsCard.style.display = 'block';
 
-    // Trigger animation
-    requestAnimationFrame(() => {
-      requestAnimationFrame(() => {
-        gsCard.querySelectorAll('.podium-slot').forEach(el => el.classList.add('visible'));
-      });
-    });
+    animatePodium(gsCard);
   } else {
     gsCard.style.display = 'none';
   }
