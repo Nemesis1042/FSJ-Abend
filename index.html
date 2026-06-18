@@ -227,16 +227,6 @@
   }
   .player-dot { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
 
-  /* Timer bar */
-  .timer-wrap { background: #12122a; border-radius: 100px; height: 8px; overflow: hidden; }
-  .timer-bar {
-    height: 8px;
-    background: linear-gradient(90deg, var(--purple), var(--pink));
-    border-radius: 100px;
-    transition: width 1s linear;
-    width: 100%;
-  }
-
   /* Question screen */
   .question-text {
     font-size: 1.3rem;
@@ -527,14 +517,9 @@
       </div>
     </div>
 
-    <div>
-      <div class="timer-wrap"><div class="timer-bar" id="timer-bar"></div></div>
-      <div style="text-align:right;font-size:0.8rem;color:var(--muted);margin-top:4px;" id="timer-label">30s</div>
-    </div>
-
     <div class="card text-center" id="voting-status-card" style="background:var(--card);">
       <div style="font-size:2rem;">🤫</div>
-      <div class="section-title" style="margin-top:8px;margin-bottom:0;">Abstimmung läuft…</div>
+      <div class="section-title" style="margin-top:8px;margin-bottom:0;" id="vote-count-text">0 von 0 haben abgestimmt</div>
       <p class="text-muted" style="margin-top:4px;">Ergebnisse werden erst am Ende aller Fragen aufgelöst.</p>
     </div>
 
@@ -618,8 +603,6 @@ const appState = {
 };
 
 let pollInterval = null;
-let timerInterval = null;
-let timerSecondsLeft = 45;
 let extraNames = [];
 let allResults = [];   // [{question, votes:[{voted_for,cnt}]}] collected at results time
 
@@ -644,19 +627,6 @@ function beep(freq, startTime, duration, gain = 0.15, type = 'sine') {
   gainNode.connect(ctx.destination);
   osc.start(startTime);
   osc.stop(startTime + duration);
-}
-
-function playTickSound() {
-  const ctx = getAudioCtx();
-  beep(880, ctx.currentTime, 0.08, 0.08, 'square');
-}
-
-function playDrumroll() {
-  const ctx = getAudioCtx();
-  const now = ctx.currentTime;
-  for (let i = 0; i < 12; i++) {
-    beep(120 + Math.random() * 30, now + i * 0.08, 0.07, 0.12, 'triangle');
-  }
 }
 
 function playFanfare() {
@@ -686,7 +656,6 @@ async function api(action, data = {}) {
 
 function showScreen(name) {
   clearPoll();
-  clearTimer();
   document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
   document.getElementById('screen-' + name).classList.add('active');
   const badge = document.getElementById('floating-code');
@@ -701,10 +670,6 @@ function showScreen(name) {
 
 function clearPoll() {
   if (pollInterval) { clearInterval(pollInterval); pollInterval = null; }
-}
-
-function clearTimer() {
-  if (timerInterval) { clearInterval(timerInterval); timerInterval = null; }
 }
 
 // ── Fuzzy Search ─────────────────────────────────────────────────────────────
@@ -1029,7 +994,6 @@ async function startGame() {
 
 function showQuestionScreen() {
   clearPoll();
-  clearTimer();
   appState.hasVoted = false;
 
   showScreen('question');
@@ -1059,37 +1023,7 @@ function showQuestionScreen() {
     document.getElementById('voted-confirm').style.display = 'none';
   }
 
-  startTimer();
   pollQuestion();
-}
-
-function startTimer() {
-  clearTimer();
-  timerSecondsLeft = 45;
-  updateTimerBar();
-  timerInterval = setInterval(() => {
-    timerSecondsLeft--;
-    updateTimerBar();
-    if (timerSecondsLeft === 1) {
-      playDrumroll();
-    } else if (timerSecondsLeft <= 5 && timerSecondsLeft > 0) {
-      playTickSound();
-    }
-    if (timerSecondsLeft <= 0) {
-      clearTimer();
-      if (appState.role === 'moderator') {
-        const isLast = appState.currentQ >= appState.questions.length - 1;
-        if (isLast) goToResults();
-        else nextQuestion();
-      }
-    }
-  }, 1000);
-}
-
-function updateTimerBar() {
-  const pct = Math.max(0, (timerSecondsLeft / 45)) * 100;
-  document.getElementById('timer-bar').style.width = pct + '%';
-  document.getElementById('timer-label').textContent = timerSecondsLeft + 's';
 }
 
 function pollQuestion() {
@@ -1100,6 +1034,11 @@ function pollQuestion() {
     if (!res.success) return;
     const state = res.room.state;
     const voteCounts = res.room.voteCounts || {};
+
+    const totalVotes = Object.values(voteCounts).reduce((a, b) => a + b, 0);
+    const totalJoined = (state.joinedPlayers || []).length;
+    const voteCountEl = document.getElementById('vote-count-text');
+    if (voteCountEl) voteCountEl.textContent = `${totalVotes} von ${totalJoined} haben abgestimmt`;
 
     // Detect question change (voter side)
     if (appState.role === 'voter' && state.currentQ !== prevQ) {
@@ -1191,7 +1130,6 @@ async function submitVote(name) {
 // ── Next Question / Results ───────────────────────────────────────────────────
 
 async function nextQuestion() {
-  clearTimer();
   clearPoll();
   const res = await api('next_question', { code: appState.roomCode });
   if (!res.success) return;
@@ -1205,7 +1143,6 @@ async function nextQuestion() {
 }
 
 async function goToResults() {
-  clearTimer();
   clearPoll();
   await api('end_game', { code: appState.roomCode });
   appState.status = 'ended';
