@@ -429,6 +429,40 @@
   #screen-reveal .section-title, #screen-results h2 { font-size: 1.5rem; }
   #screen-reveal button, #screen-results button { font-size: 1.2rem; padding: 18px 20px; }
 
+  /* Custom option voting buttons */
+  .vote-option-grid { display: flex; flex-wrap: wrap; gap: 12px; justify-content: center; padding: 8px 0; }
+  .vote-option-btn {
+    padding: 16px 24px;
+    border-radius: 14px;
+    border: 2px solid var(--muted);
+    background: transparent;
+    color: var(--text);
+    font-size: 1.15rem;
+    font-family: 'Bebas Neue', sans-serif;
+    letter-spacing: 0.03em;
+    cursor: pointer;
+    transition: transform 0.1s, background 0.12s;
+    min-width: 130px;
+    text-align: center;
+  }
+  .vote-option-btn:active { transform: scale(0.94); }
+
+  /* Custom question builder */
+  .custom-q-item {
+    display: flex; align-items: flex-start; gap: 8px;
+    background: var(--card2); padding: 10px 12px;
+    border-radius: 10px; margin-bottom: 6px;
+  }
+  .custom-q-item-body { flex: 1; min-width: 0; }
+  .custom-q-item-title { font-size: 0.95rem; font-weight: 600; }
+  .custom-q-option-tag {
+    display: inline-flex; align-items: center; gap: 4px;
+    background: rgba(255,255,255,0.1); border-radius: 20px;
+    padding: 2px 10px; font-size: 0.8rem; margin: 3px 2px 0 0;
+    cursor: pointer;
+  }
+  .custom-q-option-tag:hover { background: rgba(255,80,80,0.25); }
+
   /* Category breakdown */
   .cat-result-card { background: var(--card2); border-radius: 12px; padding: 14px 16px; display: flex; align-items: center; gap: 12px; }
   .cat-result-icon { font-size: 1.5rem; flex-shrink: 0; }
@@ -535,6 +569,24 @@
       <div id="question-list" style="display:flex;flex-direction:column;gap:8px;"></div>
     </div>
 
+    <div class="card">
+      <div class="section-title">Eigene Frage erstellen</div>
+
+      <div id="custom-questions-list"></div>
+
+      <input type="text" id="custom-q-text" placeholder="Frage eingeben…" style="margin-bottom:10px;" onkeydown="if(event.key==='Enter')document.getElementById('custom-opt-input').focus()">
+
+      <div style="font-size:0.8rem;color:var(--muted);margin-bottom:6px;">
+        Antwortmöglichkeiten <span style="opacity:0.7;">(leer lassen = Spielernamen als Optionen)</span>
+      </div>
+      <div id="custom-options-preview" style="display:flex;flex-wrap:wrap;gap:4px;min-height:24px;margin-bottom:8px;"></div>
+      <div style="display:flex;gap:8px;">
+        <input type="text" id="custom-opt-input" placeholder="Option tippen…" style="flex:1;" onkeydown="if(event.key==='Enter')addCustomOption()">
+        <button class="btn-sm btn-secondary" onclick="addCustomOption()">+ Option</button>
+      </div>
+      <button class="btn-primary" style="margin-top:12px;" onclick="addCustomQuestion()">✅ Frage hinzufügen</button>
+    </div>
+
     <button class="btn-primary" onclick="createRoom()">🎯 Raum erstellen</button>
     <button class="btn-secondary" onclick="showScreen('home')">← Zurück</button>
   </div>
@@ -568,10 +620,12 @@
     <div class="card" style="background: var(--card2);">
       <div class="q-progress" id="prevote-progress">Frage 1 von 10</div>
       <div style="margin-top:8px;">
-        <span class="question-prefix">Wer würde am ehesten…</span>
+        <span class="question-prefix" id="prevote-q-prefix">Wer würde am ehesten…</span>
         <div class="question-text" id="prevote-q-text">—</div>
       </div>
     </div>
+
+    <div id="prevote-options-wrap" style="display:none;"></div>
 
     <div id="prevote-input-wrap">
       <div class="autocomplete-wrap">
@@ -619,7 +673,7 @@
     <div class="card" style="background: var(--card2);">
       <div class="q-progress" id="reveal-progress">Frage 1 von 10</div>
       <div style="margin-top:8px;">
-        <span class="question-prefix">Wer würde am ehesten…</span>
+        <span class="question-prefix" id="reveal-q-prefix">Wer würde am ehesten…</span>
         <div class="question-text" id="reveal-q-text">—</div>
       </div>
     </div>
@@ -705,7 +759,54 @@ const appState = {
 
 let pollInterval = null;
 let extraNames = [];
-let allResults = [];   // [{question, votes:[{voted_for,cnt}]}] collected at results time
+let allResults = [];
+let customQuestions = []; // { text, options[] }
+
+function addCustomOption() {
+  const input = document.getElementById('custom-opt-input');
+  const val = input.value.trim();
+  if (!val) return;
+  input.value = '';
+  const preview = document.getElementById('custom-options-preview');
+  const tag = document.createElement('span');
+  tag.className = 'custom-q-option-tag';
+  tag.dataset.value = val;
+  tag.innerHTML = `${val} <span onclick="this.parentElement.remove()" title="Entfernen">✕</span>`;
+  preview.appendChild(tag);
+  document.getElementById('custom-opt-input').focus();
+}
+
+function addCustomQuestion() {
+  const text = document.getElementById('custom-q-text').value.trim();
+  if (!text) { alert('Bitte eine Frage eingeben.'); return; }
+  const options = [...document.querySelectorAll('#custom-options-preview .custom-q-option-tag')]
+    .map(t => t.dataset.value).filter(Boolean);
+  customQuestions.push({ text, options });
+  renderCustomQuestionsList();
+  document.getElementById('custom-q-text').value = '';
+  document.getElementById('custom-options-preview').innerHTML = '';
+}
+
+function removeCustomQuestion(idx) {
+  customQuestions.splice(idx, 1);
+  renderCustomQuestionsList();
+}
+
+function renderCustomQuestionsList() {
+  const list = document.getElementById('custom-questions-list');
+  if (!list) return;
+  list.innerHTML = customQuestions.map((q, i) => `
+    <div class="custom-q-item">
+      <div class="custom-q-item-body">
+        <div class="custom-q-item-title">${q.text}</div>
+        ${q.options.length > 0
+          ? `<div style="margin-top:5px;">${q.options.map(o => `<span class="custom-q-option-tag" style="cursor:default;"><span>${o}</span></span>`).join('')}</div>`
+          : `<div style="font-size:0.78rem;color:var(--muted);margin-top:3px;">Spielernamen als Optionen</div>`}
+      </div>
+      <button class="btn-sm btn-secondary" onclick="removeCustomQuestion(${i})" style="flex-shrink:0;">✕</button>
+    </div>
+  `).join('');
+}   // [{question, votes:[{voted_for,cnt}]}] collected at results time
 
 // ── API ──────────────────────────────────────────────────────────────────────
 
@@ -777,6 +878,9 @@ function fuzzyFilter(input, names) {
 // ── Home → Setup ─────────────────────────────────────────────────────────────
 
 function initSetup() {
+  customQuestions = [];
+  renderCustomQuestionsList();
+
   // Name grid
   const grid = document.getElementById('name-grid');
   grid.innerHTML = '';
@@ -907,8 +1011,16 @@ async function createRoom() {
   const players = [...checkedNames, ...extraNames];
   if (players.length < 2) { alert('Bitte mindestens 2 Spieler auswählen.'); return; }
 
-  // Collect checked questions
-  const questions = [...document.querySelectorAll('#question-list input[type="checkbox"]:checked')].map(c => ({ text: c.value }));
+  // Collect checked standard questions (prefixed = "Wer würde am ehesten")
+  const standardQs = [...document.querySelectorAll('#question-list input[type="checkbox"]:checked')]
+    .map(c => ({ text: c.value, prefixed: true }));
+
+  // Merge with custom questions
+  const allCustomQs = customQuestions.map(q => ({
+    text: q.text,
+    ...(q.options.length > 0 ? { options: q.options } : {}),
+  }));
+  const questions = [...standardQs, ...allCustomQs];
   if (questions.length === 0) { alert('Bitte mindestens eine Frage auswählen.'); return; }
 
   // Shuffle order
@@ -917,13 +1029,29 @@ async function createRoom() {
     [questions[i], questions[j]] = [questions[j], questions[i]];
   }
 
-  // Assign colors
+  // Assign player colors
   const playerColors = {};
   players.forEach((p, i) => { playerColors[p] = COLORS[i % COLORS.length]; });
 
-  const colorsArr = players.map(p => playerColors[p]);
+  // Assign colors to custom options
+  let colorIdx = players.length;
+  questions.forEach(q => {
+    (q.options || []).forEach(opt => {
+      if (!playerColors[opt]) {
+        playerColors[opt] = COLORS[colorIdx % COLORS.length];
+        colorIdx++;
+      }
+    });
+  });
 
-  const res = await api('create_room', { players, questions, colors: colorsArr });
+  const colorsArr = players.map(p => playerColors[p]);
+  // Build option color map for storage (so voters can load them)
+  const optionColorMap = {};
+  questions.forEach(q => {
+    (q.options || []).forEach(opt => { optionColorMap[opt] = playerColors[opt]; });
+  });
+
+  const res = await api('create_room', { players, questions, colors: colorsArr, optionColorMap });
   if (!res.success) { alert('Fehler: ' + (res.error || 'Unbekannt')); return; }
 
   appState.role = 'moderator';
@@ -973,6 +1101,7 @@ async function joinRoom() {
   const colorsArr = state.colors || [];
   const playerColors = {};
   appState.players.forEach((p, i) => { playerColors[p] = colorsArr[i] || COLORS[i % COLORS.length]; });
+  Object.assign(playerColors, state.optionColorMap || {});
   appState.playerColors = playerColors;
 
   const joined = [...(state.joinedPlayers || []), appState.voterName];
@@ -1091,8 +1220,11 @@ async function startReveal() {
 function showRevealScreen() {
   showScreen('reveal');
   const q = appState.questions[appState.revealIdx];
+  const hasOptions = q && q.options && q.options.length > 0;
+  const showPrefix = q && q.prefixed === true && !hasOptions;
   document.getElementById('reveal-progress').textContent = `Frage ${appState.revealIdx + 1} von ${appState.questions.length}`;
   document.getElementById('reveal-q-text').textContent = q?.text ?? q;
+  document.getElementById('reveal-q-prefix').style.display = showPrefix ? '' : 'none';
   const prereveal = document.getElementById('reveal-prereveal-wrap');
   prereveal.innerHTML = '<div class="text-center waiting-pulse">🤫 Noch nicht aufgelöst…</div>';
   prereveal.style.display = 'block';
@@ -1204,21 +1336,43 @@ function showPrevoteQuestion() {
   showScreen('prevote');
   if (appState.voterQ >= appState.questions.length) {
     document.getElementById('prevote-input-wrap').style.display = 'none';
+    document.getElementById('prevote-options-wrap').style.display = 'none';
     document.getElementById('prevote-done').style.display = 'block';
     api('mark_voter_done', { code: appState.roomCode, voterName: appState.voterName });
     pollAfterVotingDone();
     return;
   }
-  document.getElementById('prevote-input-wrap').style.display = 'block';
   document.getElementById('prevote-done').style.display = 'none';
 
   const q = appState.questions[appState.voterQ];
+  const hasOptions = q.options && q.options.length > 0;
+  const showPrefix = q.prefixed === true && !hasOptions;
+
   document.getElementById('prevote-progress').textContent = `Frage ${appState.voterQ + 1} von ${appState.questions.length}`;
   document.getElementById('prevote-q-text').textContent = q?.text ?? q;
+  document.getElementById('prevote-q-prefix').style.display = showPrefix ? '' : 'none';
 
-  setupPrevoteVoteSuggestions(appState.players);
-  document.getElementById('prevote-vote-input').value = '';
-  document.getElementById('prevote-vote-dropdown').style.display = 'none';
+  if (hasOptions) {
+    document.getElementById('prevote-input-wrap').style.display = 'none';
+    document.getElementById('prevote-options-wrap').style.display = 'block';
+    renderPrevoteOptions(q.options);
+  } else {
+    document.getElementById('prevote-options-wrap').style.display = 'none';
+    document.getElementById('prevote-input-wrap').style.display = 'block';
+    setupPrevoteVoteSuggestions(appState.players);
+    document.getElementById('prevote-vote-input').value = '';
+    document.getElementById('prevote-vote-dropdown').style.display = 'none';
+  }
+}
+
+function renderPrevoteOptions(options) {
+  const wrap = document.getElementById('prevote-options-wrap');
+  wrap.innerHTML = '<div class="vote-option-grid">' + options.map(opt => {
+    const color = appState.playerColors[opt] || '#fff';
+    return `<button class="vote-option-btn" style="border-color:${color};color:${color};" onclick="submitPrevoteVote('${opt.replace(/'/g,"\\'")}')">
+      ${opt}
+    </button>`;
+  }).join('') + '</div>';
 }
 
 function setupPrevoteVoteSuggestions(players) {
@@ -1340,7 +1494,11 @@ function renderResults() {
       .filter(([, cnt]) => cnt > 0);
 
     const total = sorted.reduce((a, [, c]) => a + c, 0);
-    let inner = `<div class="result-question">Frage ${idx + 1}: Wer würde am ehesten… ${r.question}?</div>`;
+    const qObj = appState.questions[idx];
+    const qLabel = (qObj && qObj.prefixed && !(qObj.options && qObj.options.length))
+      ? `Frage ${idx + 1}: Wer würde am ehesten… ${r.question}?`
+      : `Frage ${idx + 1}: ${r.question}`;
+    let inner = `<div class="result-question">${qLabel}</div>`;
 
     if (sorted.length === 0) {
       inner += '<div class="text-muted">Keine Stimmen</div>';
